@@ -8897,17 +8897,14 @@ function maximizeProjection(playerId) {
     // Update switch button highlights
     updateMaximizeSwitches(playerId);
     
-    // Force layout reflow before rescaling to ensure container dimensions are updated
-    document.getElementById('projectionsGrid').offsetHeight;
-    
-    // Immediately rescale visible projections - no delay
-    requestAnimationFrame(() => {
+    // Wait for CSS transition to complete (300ms) before rescaling
+    setTimeout(() => {
         fourPlayerSystem.connectedPlayers.forEach((player, pid) => {
             if (player.containerState && player.containerState.length > 0) {
                 fourPlayerSystem.updateRemotePlayerContainer(pid, player.containerState);
             }
         });
-    });
+    }, 350); // Wait slightly longer than the 300ms transition
     
     // Broadcast view state change
     if (fourPlayerSystem.isConnected) {
@@ -8941,17 +8938,14 @@ function switchMaximized(playerId) {
     // Update switch button highlights
     updateMaximizeSwitches(playerId);
     
-    // Force layout reflow before rescaling to ensure container dimensions are updated
-    allSections.forEach(section => section.offsetHeight);
-    
-    // Immediately rescale visible projections - no delay
-    requestAnimationFrame(() => {
+    // Wait for CSS transition to complete (300ms) before rescaling
+    setTimeout(() => {
         fourPlayerSystem.connectedPlayers.forEach((player, pid) => {
             if (player.containerState && player.containerState.length > 0) {
                 fourPlayerSystem.updateRemotePlayerContainer(pid, player.containerState);
             }
         });
-    });
+    }, 350); // Wait slightly longer than the 300ms transition
     
     // Broadcast view state change
     if (fourPlayerSystem.isConnected) {
@@ -8985,17 +8979,14 @@ function minimizeProjection() {
     // Clear switch button highlights
     updateMaximizeSwitches(null);
     
-    // Force layout reflow before rescaling to ensure container dimensions are updated
-    document.getElementById('projectionsGrid').offsetHeight;
-    
-    // Immediately rescale all projections - no delay
-    requestAnimationFrame(() => {
+    // Wait for CSS transition to complete (300ms) before rescaling
+    setTimeout(() => {
         fourPlayerSystem.connectedPlayers.forEach((player, pid) => {
             if (player.containerState && player.containerState.length > 0) {
                 fourPlayerSystem.updateRemotePlayerContainer(pid, player.containerState);
             }
         });
-    });
+    }, 350); // Wait slightly longer than the 300ms transition
     
     // Broadcast view state change
     if (fourPlayerSystem.isConnected) {
