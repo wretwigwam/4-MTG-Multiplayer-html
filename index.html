@@ -153,7 +153,7 @@
             gap: 15px;
             margin-bottom: 15px;
             min-height: 500px;
-            transition: all 0.1s ease;
+            transition: all 0.3s ease;
             isolation: isolate;
         }
         
@@ -4805,8 +4805,6 @@ updateOwnSlot() {
             
             // Disable viewing your own deck through remote zone buttons
             this.disableOwnDeckButton();
-            // Disable viewing your own hand through remote zone buttons
-            this.disableOwnHandButton();
         }
     }
 
@@ -4822,23 +4820,6 @@ updateOwnSlot() {
                 deckBtn.onclick = (e) => {
                     e.preventDefault();
                     this.log('❌ Use the Deck section below to view your own deck', 'warning');
-                };
-            }
-        }
-    }
-
-    disableOwnHandButton() {
-        // Disable the hand button for the player's own slot
-        if (this.playerId) {
-            const handBtn = document.getElementById(`player${this.playerId}HandBtn`);
-            if (handBtn) {
-                handBtn.disabled = true;
-                handBtn.style.opacity = '0.5';
-                handBtn.style.cursor = 'not-allowed';
-                handBtn.title = 'Use the Hand Container below to view your own hand';
-                handBtn.onclick = (e) => {
-                    e.preventDefault();
-                    this.log('❌ Use the Hand Container below to view your own hand', 'warning');
                 };
             }
         }
@@ -6817,66 +6798,6 @@ function createRemoteModalCard(cardData, index, playerId, zoneType, canTakeCards
                 fourPlayerSystem.log(`📋 ${cardData.name} from Player ${playerId}'s ${zoneType}`);
             }
         });
-    }
-
-    // Add shift+hover zoom functionality for remote modal cards
-    let remoteModalZoomTimeout;
-    let remoteModalZoomPreview = null;
-    
-    cardDiv.addEventListener('mouseenter', (e) => {
-        if (e.shiftKey && cardData.src) {
-            remoteModalZoomTimeout = setTimeout(() => {
-                showRemoteModalCardZoom(cardData, e.clientX, e.clientY);
-            }, 100);
-        }
-    });
-    
-    cardDiv.addEventListener('mousemove', (e) => {
-        if (e.shiftKey && !remoteModalZoomPreview && cardData.src) {
-            remoteModalZoomTimeout = setTimeout(() => {
-                showRemoteModalCardZoom(cardData, e.clientX, e.clientY);
-            }, 100);
-        } else if (!e.shiftKey && remoteModalZoomPreview) {
-            hideRemoteModalCardZoom();
-        }
-    });
-    
-    cardDiv.addEventListener('mouseleave', () => {
-        clearTimeout(remoteModalZoomTimeout);
-        hideRemoteModalCardZoom();
-    });
-    
-    function showRemoteModalCardZoom(data, x, y) {
-        if (remoteModalZoomPreview) return;
-        
-        remoteModalZoomPreview = document.createElement('div');
-        remoteModalZoomPreview.style.position = 'fixed';
-        remoteModalZoomPreview.style.pointerEvents = 'none';
-        remoteModalZoomPreview.style.zIndex = '99999';
-        remoteModalZoomPreview.style.left = (x + 20) + 'px';
-        remoteModalZoomPreview.style.top = (y - 150) + 'px';
-        remoteModalZoomPreview.style.background = 'rgba(0, 0, 0, 0.95)';
-        remoteModalZoomPreview.style.padding = '8px';
-        remoteModalZoomPreview.style.borderRadius = '12px';
-        remoteModalZoomPreview.style.boxShadow = '0 8px 32px rgba(0, 0, 0, 0.8)';
-        remoteModalZoomPreview.style.maxWidth = '400px';
-        
-        const zoomImg = document.createElement('img');
-        zoomImg.src = data.src;
-        zoomImg.style.width = '300px';
-        zoomImg.style.height = 'auto';
-        zoomImg.style.borderRadius = '8px';
-        zoomImg.style.display = 'block';
-        
-        remoteModalZoomPreview.appendChild(zoomImg);
-        document.body.appendChild(remoteModalZoomPreview);
-    }
-    
-    function hideRemoteModalCardZoom() {
-        if (remoteModalZoomPreview) {
-            remoteModalZoomPreview.remove();
-            remoteModalZoomPreview = null;
-        }
     }
 
     return cardDiv;
@@ -8976,20 +8897,14 @@ function maximizeProjection(playerId) {
     // Update switch button highlights
     updateMaximizeSwitches(playerId);
     
-    // Listen for transition end to rescale immediately when animation completes
-    const grid = document.getElementById('projectionsGrid');
-    const rescaleHandler = () => {
-        grid.removeEventListener('transitionend', rescaleHandler);
+    // Immediately rescale visible projections - no delay
+    requestAnimationFrame(() => {
         fourPlayerSystem.connectedPlayers.forEach((player, pid) => {
             if (player.containerState && player.containerState.length > 0) {
                 fourPlayerSystem.updateRemotePlayerContainer(pid, player.containerState);
             }
         });
-    };
-    grid.addEventListener('transitionend', rescaleHandler);
-    
-    // Fallback timeout in case transitionend doesn't fire
-    setTimeout(rescaleHandler, 150);
+    });
     
     // Broadcast view state change
     if (fourPlayerSystem.isConnected) {
@@ -9023,14 +8938,12 @@ function switchMaximized(playerId) {
     // Update switch button highlights
     updateMaximizeSwitches(playerId);
     
-    // Rescale immediately - sections don't have transitions, only visibility changes
+    // Immediately rescale visible projections - no delay
     requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-            fourPlayerSystem.connectedPlayers.forEach((player, pid) => {
-                if (player.containerState && player.containerState.length > 0) {
-                    fourPlayerSystem.updateRemotePlayerContainer(pid, player.containerState);
-                }
-            });
+        fourPlayerSystem.connectedPlayers.forEach((player, pid) => {
+            if (player.containerState && player.containerState.length > 0) {
+                fourPlayerSystem.updateRemotePlayerContainer(pid, player.containerState);
+            }
         });
     });
     
@@ -9066,20 +8979,14 @@ function minimizeProjection() {
     // Clear switch button highlights
     updateMaximizeSwitches(null);
     
-    // Listen for transition end to rescale immediately when animation completes
-    const grid = document.getElementById('projectionsGrid');
-    const rescaleHandler = () => {
-        grid.removeEventListener('transitionend', rescaleHandler);
+    // Immediately rescale all projections - no delay
+    requestAnimationFrame(() => {
         fourPlayerSystem.connectedPlayers.forEach((player, pid) => {
             if (player.containerState && player.containerState.length > 0) {
                 fourPlayerSystem.updateRemotePlayerContainer(pid, player.containerState);
             }
         });
-    };
-    grid.addEventListener('transitionend', rescaleHandler);
-    
-    // Fallback timeout in case transitionend doesn't fire
-    setTimeout(rescaleHandler, 150);
+    });
     
     // Broadcast view state change
     if (fourPlayerSystem.isConnected) {
