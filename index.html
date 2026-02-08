@@ -8897,19 +8897,20 @@ function maximizeProjection(playerId) {
     // Update switch button highlights
     updateMaximizeSwitches(playerId);
     
-    // Automatically refresh the maximized player's view
-    setTimeout(() => {
-        refreshPlayerView(playerId);
-    }, 100);
-    
-    // Immediately rescale visible projections - no delay
-    requestAnimationFrame(() => {
+    // Listen for transition end to rescale immediately when animation completes
+    const grid = document.getElementById('projectionsGrid');
+    const rescaleHandler = () => {
+        grid.removeEventListener('transitionend', rescaleHandler);
         fourPlayerSystem.connectedPlayers.forEach((player, pid) => {
             if (player.containerState && player.containerState.length > 0) {
                 fourPlayerSystem.updateRemotePlayerContainer(pid, player.containerState);
             }
         });
-    });
+    };
+    grid.addEventListener('transitionend', rescaleHandler);
+    
+    // Fallback timeout in case transitionend doesn't fire
+    setTimeout(rescaleHandler, 350);
     
     // Broadcast view state change
     if (fourPlayerSystem.isConnected) {
@@ -8943,17 +8944,14 @@ function switchMaximized(playerId) {
     // Update switch button highlights
     updateMaximizeSwitches(playerId);
     
-    // Automatically refresh the newly visible player's view
-    setTimeout(() => {
-        refreshPlayerView(playerId);
-    }, 100);
-    
-    // Immediately rescale visible projections - no delay
+    // Rescale immediately - sections don't have transitions, only visibility changes
     requestAnimationFrame(() => {
-        fourPlayerSystem.connectedPlayers.forEach((player, pid) => {
-            if (player.containerState && player.containerState.length > 0) {
-                fourPlayerSystem.updateRemotePlayerContainer(pid, player.containerState);
-            }
+        requestAnimationFrame(() => {
+            fourPlayerSystem.connectedPlayers.forEach((player, pid) => {
+                if (player.containerState && player.containerState.length > 0) {
+                    fourPlayerSystem.updateRemotePlayerContainer(pid, player.containerState);
+                }
+            });
         });
     });
     
@@ -8989,21 +8987,20 @@ function minimizeProjection() {
     // Clear switch button highlights
     updateMaximizeSwitches(null);
     
-    // Automatically refresh all players' views when returning to grid
-    setTimeout(() => {
-        for (let i = 1; i <= 4; i++) {
-            refreshPlayerView(i);
-        }
-    }, 100);
-    
-    // Immediately rescale all projections - no delay
-    requestAnimationFrame(() => {
+    // Listen for transition end to rescale immediately when animation completes
+    const grid = document.getElementById('projectionsGrid');
+    const rescaleHandler = () => {
+        grid.removeEventListener('transitionend', rescaleHandler);
         fourPlayerSystem.connectedPlayers.forEach((player, pid) => {
             if (player.containerState && player.containerState.length > 0) {
                 fourPlayerSystem.updateRemotePlayerContainer(pid, player.containerState);
             }
         });
-    });
+    };
+    grid.addEventListener('transitionend', rescaleHandler);
+    
+    // Fallback timeout in case transitionend doesn't fire
+    setTimeout(rescaleHandler, 350);
     
     // Broadcast view state change
     if (fourPlayerSystem.isConnected) {
