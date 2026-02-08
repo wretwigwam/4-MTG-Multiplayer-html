@@ -3977,8 +3977,30 @@ class FourPlayerWebSocketSystem {
         if (this.isConnected) {
             this.disconnect();
         } else {
-            // Open lobby modal to choose how to join
-            openLobbyModal();
+            // Check if we have reconnection info in localStorage
+            let hasReconnectInfo = false;
+            try {
+                const savedSeat = localStorage.getItem('ws_seat_number');
+                const savedCode = localStorage.getItem('ws_game_code');
+                const savedSpectator = localStorage.getItem('ws_is_spectator');
+                
+                if (savedSeat && savedCode) {
+                    hasReconnectInfo = true;
+                    this.log(`🔄 Found previous session - reconnecting automatically...`);
+                    this.seatNumber = parseInt(savedSeat);
+                    this.gameCode = savedCode;
+                    this.isSpectator = savedSpectator === 'true';
+                    this.connect();
+                    return;
+                }
+            } catch (e) {
+                console.log('Could not check for reconnection info');
+            }
+            
+            // No reconnection info - open lobby modal to choose how to join
+            if (!hasReconnectInfo) {
+                openLobbyModal();
+            }
         }
     }
 
@@ -4007,6 +4029,24 @@ class FourPlayerWebSocketSystem {
         if (!this.serverUrl || !this.roomId || !this.playerName) {
             this.log('Please fill in all connection fields', 'error');
             return;
+        }
+
+        // Try to restore seat and game code from localStorage if reconnecting
+        if (!this.seatNumber || !this.gameCode) {
+            try {
+                const savedSeat = localStorage.getItem('ws_seat_number');
+                const savedCode = localStorage.getItem('ws_game_code');
+                const savedSpectator = localStorage.getItem('ws_is_spectator');
+                
+                if (savedSeat && savedCode) {
+                    this.seatNumber = parseInt(savedSeat);
+                    this.gameCode = savedCode;
+                    this.isSpectator = savedSpectator === 'true';
+                    this.log(`🔄 Attempting to reconnect to seat ${this.seatNumber}...`);
+                }
+            } catch (e) {
+                console.log('Could not restore connection info from localStorage');
+            }
         }
 
         this.isConnecting = true;
@@ -4049,6 +4089,15 @@ class FourPlayerWebSocketSystem {
         this.updatePlayerInfo();
         this.clearAllPlayerSlots();
         this.connectBtn.disabled = false;
+        
+        // Clear reconnection data from localStorage when user intentionally disconnects
+        try {
+            localStorage.removeItem('ws_seat_number');
+            localStorage.removeItem('ws_game_code');
+            localStorage.removeItem('ws_is_spectator');
+        } catch (e) {
+            console.log('Could not clear localStorage');
+        }
         
         this.log('Disconnected from server');
     }
@@ -5316,6 +5365,7 @@ updateOwnSlot() {
             this.connectionStatus.textContent = '🟢 WebSocket: Connected';
             this.connectBtn.textContent = '🔌 Disconnect';
             this.connectBtn.className = 'btn disconnect';
+            this.connectBtn.style.background = ''; // Reset custom background
         } else if (this.isConnecting) {
             this.connectionStatus.className = 'connection-status connecting';
             this.connectionStatus.textContent = '🟡 WebSocket: Connecting...';
@@ -5324,7 +5374,24 @@ updateOwnSlot() {
         } else {
             this.connectionStatus.className = 'connection-status disconnected';
             this.connectionStatus.textContent = '🔴 WebSocket: Disconnected';
-            this.connectBtn.textContent = '🔌 Connect to Server';
+            
+            // Check if reconnection info exists
+            try {
+                const savedSeat = localStorage.getItem('ws_seat_number');
+                const savedCode = localStorage.getItem('ws_game_code');
+                
+                if (savedSeat && savedCode) {
+                    this.connectBtn.textContent = '🔄 Reconnect (Seat ' + savedSeat + ')';
+                    this.connectBtn.style.background = 'linear-gradient(135deg, #FF9800, #F57C00)';
+                } else {
+                    this.connectBtn.textContent = '🔌 Connect to Server';
+                    this.connectBtn.style.background = ''; // Reset custom background
+                }
+            } catch (e) {
+                this.connectBtn.textContent = '🔌 Connect to Server';
+                this.connectBtn.style.background = '';
+            }
+            
             this.connectBtn.className = 'btn join';
         }
     }
@@ -9436,6 +9503,29 @@ document.addEventListener('DOMContentLoaded', () => {
                 saveLifeEdit();
             }
         });
+    }
+});
+
+// Check for reconnection info on page load
+document.addEventListener('DOMContentLoaded', () => {
+    try {
+        const savedSeat = localStorage.getItem('ws_seat_number');
+        const savedCode = localStorage.getItem('ws_game_code');
+        
+        if (savedSeat && savedCode) {
+            const connectBtn = document.getElementById('connectBtn');
+            if (connectBtn) {
+                connectBtn.textContent = '🔄 Reconnect (Seat ' + savedSeat + ')';
+                connectBtn.style.background = 'linear-gradient(135deg, #FF9800, #F57C00)';
+            }
+            
+            // Add a note to the log
+            if (fourPlayerSystem) {
+                fourPlayerSystem.log('💾 Previous session found - click Connect to rejoin Seat ' + savedSeat, 'info');
+            }
+        }
+    } catch (e) {
+        console.log('Could not check for reconnection info');
     }
 });
 
