@@ -8897,6 +8897,9 @@ function maximizeProjection(playerId) {
     // Update switch button highlights
     updateMaximizeSwitches(playerId);
     
+    // Force layout reflow before rescaling to ensure container dimensions are updated
+    document.getElementById('projectionsGrid').offsetHeight;
+    
     // Immediately rescale visible projections - no delay
     requestAnimationFrame(() => {
         fourPlayerSystem.connectedPlayers.forEach((player, pid) => {
@@ -8938,6 +8941,9 @@ function switchMaximized(playerId) {
     // Update switch button highlights
     updateMaximizeSwitches(playerId);
     
+    // Force layout reflow before rescaling to ensure container dimensions are updated
+    allSections.forEach(section => section.offsetHeight);
+    
     // Immediately rescale visible projections - no delay
     requestAnimationFrame(() => {
         fourPlayerSystem.connectedPlayers.forEach((player, pid) => {
@@ -8978,6 +8984,9 @@ function minimizeProjection() {
     
     // Clear switch button highlights
     updateMaximizeSwitches(null);
+    
+    // Force layout reflow before rescaling to ensure container dimensions are updated
+    document.getElementById('projectionsGrid').offsetHeight;
     
     // Immediately rescale all projections - no delay
     requestAnimationFrame(() => {
