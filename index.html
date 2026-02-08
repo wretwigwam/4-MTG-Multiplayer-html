@@ -4072,13 +4072,33 @@ class FourPlayerWebSocketSystem {
     }
 
     disconnect() {
-        if (this.ws) {
-            // Remove event listeners to prevent reconnection attempts
-            this.ws.onclose = null;
-            this.ws.onerror = null;
-            this.ws.close(1000, 'User disconnected');
-            this.ws = null;
+        if (this.ws && this.isConnected) {
+            // Send leave_game message to permanently remove player from room
+            try {
+                this.sendMessage({
+                    type: 'leave_game',
+                    data: {
+                        playerId: this.playerId,
+                        playerName: this.playerName,
+                        permanent: true
+                    }
+                });
+            } catch (e) {
+                console.log('Could not send leave_game message');
+            }
+            
+            // Give the message a moment to send before closing
+            setTimeout(() => {
+                if (this.ws) {
+                    // Remove event listeners to prevent reconnection attempts
+                    this.ws.onclose = null;
+                    this.ws.onerror = null;
+                    this.ws.close(1000, 'User disconnected');
+                    this.ws = null;
+                }
+            }, 100);
         }
+        
         this.isConnected = false;
         this.isConnecting = false;
         this.playerId = null;
@@ -4090,16 +4110,17 @@ class FourPlayerWebSocketSystem {
         this.clearAllPlayerSlots();
         this.connectBtn.disabled = false;
         
-        // Clear reconnection data from localStorage when user intentionally disconnects
+        // Clear ALL reconnection data from localStorage when user intentionally disconnects
         try {
             localStorage.removeItem('ws_seat_number');
             localStorage.removeItem('ws_game_code');
             localStorage.removeItem('ws_is_spectator');
+            localStorage.removeItem('ws_player_uuid'); // Also clear UUID so they get a new identity
         } catch (e) {
             console.log('Could not clear localStorage');
         }
         
-        this.log('Disconnected from server');
+        this.log('🚪 You have left the game');
     }
 
     onWebSocketOpen(event) {
@@ -4219,11 +4240,16 @@ class FourPlayerWebSocketSystem {
 
             case 'player_left':
                 const leftPlayerId = message.data.playerId;
-                const leftPlayer = this.connectedPlayers.get(leftPlayerId);
-                if (leftPlayer) {
-                    this.connectedPlayers.delete(leftPlayerId);
-                    this.clearPlayerSlot(leftPlayerId);
-                    this.log(`👋 Player ${leftPlayerId} (${leftPlayer.playerName}) left`);
+                const leftPlayerName = message.data.playerName;
+                const isPermanent = message.data.permanent;
+                
+                this.connectedPlayers.delete(leftPlayerId);
+                this.clearPlayerSlot(leftPlayerId);
+                
+                if (isPermanent) {
+                    this.log(`👋 Player ${leftPlayerId} (${leftPlayerName}) left the game`);
+                } else {
+                    this.log(`👋 Player ${leftPlayerId} (${leftPlayerName}) left`);
                 }
                 break;
 
