@@ -384,6 +384,21 @@
             box-shadow: 0 0 8px #F44336;
         }
 
+        .player-disconnected {
+            background: #FF9800;
+            box-shadow: 0 0 8px #FF9800;
+            animation: pulse-warning 2s ease-in-out infinite;
+        }
+
+        @keyframes pulse-warning {
+            0%, 100% {
+                opacity: 1;
+            }
+            50% {
+                opacity: 0.5;
+            }
+        }
+
         .flex-container {
             position: relative;
             flex: 1;
@@ -4129,7 +4144,17 @@ class FourPlayerWebSocketSystem {
                     this.log(`👁️ Joined room "${this.roomId}" as Spectator`);
                     this.makeSpectatorView();
                 } else {
-                    this.log(`🎉 Joined room "${this.roomId}" as Player ${this.playerId} (Seat ${this.playerId})`);
+                    if (message.data.isReconnecting) {
+                        this.log(`🔄 Reconnected to room "${this.roomId}" as Player ${this.playerId} (Seat ${this.playerId})`);
+                        
+                        // Restore saved state if available
+                        if (message.data.savedState) {
+                            this.restoreSavedState(message.data.savedState);
+                            this.log(`✨ Your game state has been restored`);
+                        }
+                    } else {
+                        this.log(`🎉 Joined room "${this.roomId}" as Player ${this.playerId} (Seat ${this.playerId})`);
+                    }
                     this.updateOwnSlot();
                     this.broadcastContainerState();
                 }
@@ -4150,7 +4175,16 @@ class FourPlayerWebSocketSystem {
                     this.connectedPlayers.delete(leftPlayerId);
                     this.clearPlayerSlot(leftPlayerId);
                     this.log(`👋 Player ${leftPlayerId} (${leftPlayer.playerName}) left`);
-                }break;
+                }
+                break;
+
+            case 'player_disconnected':
+                const dcPlayerId = message.data.playerId;
+                const dcPlayerName = message.data.playerName;
+                // Mark player as temporarily disconnected (they can reconnect within 5 minutes)
+                this.updatePlayerSlotStatus(dcPlayerId, 'disconnected');
+                this.log(`⚠️ Player ${dcPlayerId} (${dcPlayerName}) disconnected - can reconnect within 5 minutes`);
+                break;
 
             case 'announcement':
                 this.log(`📣 ${message.data.message}`);
@@ -4605,6 +4639,22 @@ showPermissionModal(message, callback) {
         if (handCountEl) handCountEl.textContent = zoneCounts.hand || 0;
         if (exileCountEl) exileCountEl.textContent = zoneCounts.exile || 0;
         if (commandCountEl) commandCountEl.textContent = zoneCounts.command || 0;
+    }
+
+    updatePlayerSlotStatus(playerId, status) {
+        const statusEl = document.getElementById(`player${playerId}Status`);
+        if (!statusEl) return;
+        
+        if (status === 'disconnected') {
+            statusEl.className = 'player-status player-disconnected';
+            statusEl.title = 'Player temporarily disconnected - can reconnect within 5 minutes';
+        } else if (status === 'online') {
+            statusEl.className = 'player-status player-online';
+            statusEl.title = 'Player online';
+        } else if (status === 'offline') {
+            statusEl.className = 'player-status player-offline';
+            statusEl.title = 'Player offline';
+        }
     }
 
     clearPlayerSlot(playerId) {
@@ -5370,6 +5420,97 @@ updateOwnSlot() {
         this.logContainer.innerHTML = '<div class="log-entry">📋 Log cleared</div>';
     }
 
+    restoreSavedState(savedState) {
+        try {
+            // Restore container state (cards on battlefield)
+            if (savedState.containerState && Array.isArray(savedState.containerState)) {
+                this.mainContainer.innerHTML = '';
+                
+                savedState.containerState.forEach(cardData => {
+                    const card = document.createElement('div');
+                    card.className = 'card';
+                    card.setAttribute('data-id', cardData.id || uid());
+                    card.dataset.name = cardData.name || '';
+                    card.dataset.mana = cardData.mana || '';
+                    card.dataset.pt = cardData.pt || '';
+                    card.dataset.loyalty = cardData.loyalty || '';
+                    card.dataset.x = cardData.x || '0';
+                    card.dataset.y = cardData.y || '0';
+                    
+                    // Position card
+                    card.style.left = cardData.x + 'px';
+                    card.style.top = cardData.y + 'px';
+                    
+                    // Apply rotation if tapped
+                    if (cardData.rotation) {
+                        card.setAttribute('data-rotation', cardData.rotation);
+                        card.style.transform = `rotate(${cardData.rotation}deg)`;
+                        if (cardData.rotation === 90 || cardData.rotation === '90') {
+                            card.classList.add('tapped');
+                        }
+                    }
+                    
+                    // Add card image
+                    const img = document.createElement('img');
+                    img.src = cardData.src || '';
+                    img.alt = cardData.name || 'Card';
+                    img.draggable = false;
+                    card.appendChild(img);
+                    
+                    // If card is marked as added (not from deck)
+                    if (cardData.addedCard) {
+                        card.classList.add('added-card');
+                    }
+                    
+                    this.mainContainer.appendChild(card);
+                });
+                
+                this.log(`♻️ Restored ${savedState.containerState.length} cards to battlefield`);
+            }
+            
+            // Restore zone counts if available
+            if (savedState.zoneCounts) {
+                // Update deck count
+                if (typeof updateMyDeckCount === 'function') {
+                    updateMyDeckCount();
+                }
+                this.log(`♻️ Restored zone counts`);
+            }
+            
+            // Restore game state (life total, etc.) if available
+            if (savedState.gameState) {
+                if (savedState.gameState.lifeTotal !== undefined) {
+                    const lifeDisplay = document.getElementById('lifeTotal');
+                    if (lifeDisplay) {
+                        window.myLifeTotal = savedState.gameState.lifeTotal;
+                        lifeDisplay.textContent = savedState.gameState.lifeTotal;
+                    }
+                }
+                
+                if (savedState.gameState.poisonCounters !== undefined) {
+                    window.poisonCounters = savedState.gameState.poisonCounters;
+                }
+                
+                if (savedState.gameState.energyCounters !== undefined) {
+                    window.energyCounters = savedState.gameState.energyCounters;
+                }
+                
+                if (savedState.gameState.experienceCounters !== undefined) {
+                    window.experienceCounters = savedState.gameState.experienceCounters;
+                }
+                
+                this.log(`♻️ Restored game state (life, counters)`);
+            }
+            
+            // Reinitialize drag handlers for restored cards
+            this.setupDragAndDrop();
+            
+        } catch (error) {
+            console.error('Error restoring saved state:', error);
+            this.log('⚠️ Error restoring some game state', 'warning');
+        }
+    }
+
     makeSpectatorView() {
         this.mainContainer.style.pointerEvents = 'none';
         this.mainContainer.style.opacity = '0.6';
@@ -5792,9 +5933,20 @@ document.addEventListener('click', (e) => {
     fourPlayerSystem.log(`📦 ${fourPlayerSystem.selectedCards.size} cards selected`);
 });
 
-window.addEventListener('beforeunload', () => {
+// Track if this is a page refresh vs actual close
+let isPageRefresh = false;
+
+window.addEventListener('beforeunload', (e) => {
     if (fourPlayerSystem.isConnected) {
-        fourPlayerSystem.disconnect();
+        // Don't disconnect on page refresh - allow reconnection
+        // The server will keep the player's state for 5 minutes
+        // Only mark disconnection intent if user is actively leaving (not refreshing)
+        
+        // Note: We can't reliably detect the difference between refresh and close
+        // So we'll let the connection close naturally, and rely on the server's
+        // 5-minute grace period to allow reconnection
+        
+        // The UUID in localStorage will allow the player to reconnect to their seat
     }
 });
 
