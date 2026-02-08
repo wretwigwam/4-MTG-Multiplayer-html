@@ -6826,7 +6826,7 @@ function createRemoteModalCard(cardData, index, playerId, zoneType, canTakeCards
     cardDiv.addEventListener('mouseenter', (e) => {
         if (e.shiftKey && cardData.src) {
             remoteModalZoomTimeout = setTimeout(() => {
-                showRemoteModalCardZoom(cardDiv, cardData, e.clientX, e.clientY);
+                showRemoteModalCardZoom(cardData, e.clientX, e.clientY);
             }, 100);
         }
     });
@@ -6834,7 +6834,7 @@ function createRemoteModalCard(cardData, index, playerId, zoneType, canTakeCards
     cardDiv.addEventListener('mousemove', (e) => {
         if (e.shiftKey && !remoteModalZoomPreview && cardData.src) {
             remoteModalZoomTimeout = setTimeout(() => {
-                showRemoteModalCardZoom(cardDiv, cardData, e.clientX, e.clientY);
+                showRemoteModalCardZoom(cardData, e.clientX, e.clientY);
             }, 100);
         } else if (!e.shiftKey && remoteModalZoomPreview) {
             hideRemoteModalCardZoom();
@@ -6846,7 +6846,7 @@ function createRemoteModalCard(cardData, index, playerId, zoneType, canTakeCards
         hideRemoteModalCardZoom();
     });
     
-    function showRemoteModalCardZoom(card, data, x, y) {
+    function showRemoteModalCardZoom(data, x, y) {
         if (remoteModalZoomPreview) return;
         
         remoteModalZoomPreview = document.createElement('div');
