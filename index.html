@@ -5488,62 +5488,94 @@ updateOwnSlot() {
     }
 
     restoreSavedState(savedState) {
+        if (!savedState) {
+            this.log('⚠️ No saved state to restore', 'warning');
+            return;
+        }
+        
+        let restoredCards = 0;
+        let restoredZones = false;
+        let restoredGameState = false;
+        
         try {
             // Restore container state (cards on battlefield)
             if (savedState.containerState && Array.isArray(savedState.containerState)) {
                 this.mainContainer.innerHTML = '';
                 
                 savedState.containerState.forEach(cardData => {
-                    const card = document.createElement('div');
-                    card.className = 'card';
-                    card.setAttribute('data-id', cardData.id || uid());
-                    card.dataset.name = cardData.name || '';
-                    card.dataset.mana = cardData.mana || '';
-                    card.dataset.pt = cardData.pt || '';
-                    card.dataset.loyalty = cardData.loyalty || '';
-                    card.dataset.x = cardData.x || '0';
-                    card.dataset.y = cardData.y || '0';
-                    
-                    // Position card
-                    card.style.left = cardData.x + 'px';
-                    card.style.top = cardData.y + 'px';
-                    
-                    // Apply rotation if tapped
-                    if (cardData.rotation) {
-                        card.setAttribute('data-rotation', cardData.rotation);
-                        card.style.transform = `rotate(${cardData.rotation}deg)`;
-                        if (cardData.rotation === 90 || cardData.rotation === '90') {
-                            card.classList.add('tapped');
+                    try {
+                        const card = document.createElement('div');
+                        card.className = 'card';
+                        
+                        // Generate unique ID if needed
+                        const cardId = cardData.id || `restored_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+                        card.setAttribute('data-id', cardId);
+                        card.dataset.name = cardData.name || '';
+                        card.dataset.mana = cardData.mana || '';
+                        card.dataset.pt = cardData.pt || '';
+                        card.dataset.loyalty = cardData.loyalty || '';
+                        card.dataset.x = cardData.x || '0';
+                        card.dataset.y = cardData.y || '0';
+                        
+                        // Position card
+                        card.style.position = 'absolute';
+                        card.style.left = (cardData.x || 0) + 'px';
+                        card.style.top = (cardData.y || 0) + 'px';
+                        
+                        // Apply rotation if tapped
+                        if (cardData.rotation) {
+                            card.setAttribute('data-rotation', cardData.rotation);
+                            card.style.transform = `rotate(${cardData.rotation}deg)`;
+                            if (cardData.rotation === 90 || cardData.rotation === '90') {
+                                card.classList.add('tapped');
+                            }
                         }
+                        
+                        // Add card image
+                        const img = document.createElement('img');
+                        img.src = cardData.src || '';
+                        img.alt = cardData.name || 'Card';
+                        img.draggable = false;
+                        img.style.width = '100%';
+                        img.style.height = '100%';
+                        img.style.objectFit = 'cover';
+                        card.appendChild(img);
+                        
+                        // If card is marked as added (not from deck)
+                        if (cardData.addedCard) {
+                            card.classList.add('added-card');
+                        }
+                        
+                        this.mainContainer.appendChild(card);
+                        restoredCards++;
+                    } catch (cardError) {
+                        console.error('Error restoring individual card:', cardError);
                     }
-                    
-                    // Add card image
-                    const img = document.createElement('img');
-                    img.src = cardData.src || '';
-                    img.alt = cardData.name || 'Card';
-                    img.draggable = false;
-                    card.appendChild(img);
-                    
-                    // If card is marked as added (not from deck)
-                    if (cardData.addedCard) {
-                        card.classList.add('added-card');
-                    }
-                    
-                    this.mainContainer.appendChild(card);
                 });
                 
-                this.log(`♻️ Restored ${savedState.containerState.length} cards to battlefield`);
+                if (restoredCards > 0) {
+                    this.log(`♻️ Restored ${restoredCards} cards to battlefield`);
+                }
             }
-            
+        } catch (error) {
+            console.error('Error restoring container state:', error);
+        }
+        
+        try {
             // Restore zone counts if available
             if (savedState.zoneCounts) {
                 // Update deck count
                 if (typeof updateMyDeckCount === 'function') {
                     updateMyDeckCount();
                 }
+                restoredZones = true;
                 this.log(`♻️ Restored zone counts`);
             }
-            
+        } catch (error) {
+            console.error('Error restoring zone counts:', error);
+        }
+        
+        try {
             // Restore game state (life total, etc.) if available
             if (savedState.gameState) {
                 if (savedState.gameState.lifeTotal !== undefined) {
@@ -5551,30 +5583,47 @@ updateOwnSlot() {
                     if (lifeDisplay) {
                         window.myLifeTotal = savedState.gameState.lifeTotal;
                         lifeDisplay.textContent = savedState.gameState.lifeTotal;
+                        restoredGameState = true;
                     }
                 }
                 
                 if (savedState.gameState.poisonCounters !== undefined) {
                     window.poisonCounters = savedState.gameState.poisonCounters;
+                    restoredGameState = true;
                 }
                 
                 if (savedState.gameState.energyCounters !== undefined) {
                     window.energyCounters = savedState.gameState.energyCounters;
+                    restoredGameState = true;
                 }
                 
                 if (savedState.gameState.experienceCounters !== undefined) {
                     window.experienceCounters = savedState.gameState.experienceCounters;
+                    restoredGameState = true;
                 }
                 
-                this.log(`♻️ Restored game state (life, counters)`);
+                if (restoredGameState) {
+                    this.log(`♻️ Restored game state (life, counters)`);
+                }
             }
-            
-            // Reinitialize drag handlers for restored cards
-            this.setupDragAndDrop();
-            
         } catch (error) {
-            console.error('Error restoring saved state:', error);
-            this.log('⚠️ Error restoring some game state', 'warning');
+            console.error('Error restoring game state:', error);
+        }
+        
+        try {
+            // Reinitialize drag handlers for restored cards
+            if (typeof this.setupDragAndDrop === 'function') {
+                this.setupDragAndDrop();
+            }
+        } catch (error) {
+            console.error('Error setting up drag and drop:', error);
+        }
+        
+        // Final summary
+        if (restoredCards === 0 && !restoredZones && !restoredGameState) {
+            this.log('ℹ️ No game state needed to be restored (fresh game)', 'info');
+        } else {
+            this.log('✅ Game state restoration complete', 'info');
         }
     }
 
