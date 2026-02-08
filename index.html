@@ -1994,13 +1994,12 @@ function verifyCodeAndShowSeats() {
 }
 
 function requestAvailableSeats(gameCode) {
-    // SERVER-SIDE REFACTOR: Use your Render server URL
-    const DEFAULT_SERVER = 'wss://four-mtg-multiplayer.onrender.com';
-    const serverUrl = document.getElementById('serverUrl')?.value.trim() || DEFAULT_SERVER;
-    const roomId = document.getElementById('roomId')?.value.trim() || '';
+    // First connect to websocket to query seats
+    const serverUrl = document.getElementById('serverUrl').value.trim();
+    const roomId = document.getElementById('roomId').value.trim();
     
-    if (!serverUrl) {
-        alert('Server URL not configured');
+    if (!serverUrl || !roomId) {
+        alert('Please enter server URL and room ID');
         return;
     }
     
@@ -2148,8 +2147,7 @@ class FourPlayerWebSocketSystem {
         this.playerId = null;
         this.playerName = '';
         this.roomId = '';
-        // SERVER-SIDE REFACTOR: Default to your Render server
-        this.serverUrl = 'wss://four-mtg-multiplayer.onrender.com';
+        this.serverUrl = '';
         this.isSpectator = false;
         this.seatNumber = null;
         this.gameCode = null;
