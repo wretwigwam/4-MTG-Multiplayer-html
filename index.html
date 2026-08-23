@@ -2299,8 +2299,21 @@ function requestAvailableSeats(gameCode) {
             if (message.data.valid) {
                 showSeatSelection(message.data.availableSeats);
             } else {
-                alert('Invalid game code');
                 currentGameCode = null;
+                // Wrong/unknown code - don't dead-end the person, offer to
+                // watch as a spectator instead (spectating never requires
+                // the code, per handleJoinRoom on the server).
+                const wantsSpectate = confirm(
+                    "That code doesn't match this room.\n\n" +
+                    "You can't join as a player without the correct code, " +
+                    'but you can still watch as a spectator.\n\n' +
+                    'Join as a spectator instead?'
+                );
+                if (wantsSpectate) {
+                    showSpectateView();
+                } else {
+                    showJoinGameView();
+                }
             }
         } else if (message.type === 'error') {
             tempWs.close();
@@ -2398,12 +2411,12 @@ function connectToRoomWithSeat(seat, gameCode, asSpectator) {
     // Store seat and code info for reconnection
     try {
         if (!asSpectator) {
-            localStorage.setItem('ws_game_code', gameCode);
-            localStorage.setItem('ws_seat_number', seat);
+            sessionStorage.setItem('ws_game_code', gameCode);
+            sessionStorage.setItem('ws_seat_number', seat);
         }
-        localStorage.setItem('ws_is_spectator', asSpectator);
+        sessionStorage.setItem('ws_is_spectator', asSpectator);
     } catch (e) {
-        console.log('localStorage not available');
+        console.log('sessionStorage not available');
     }
     
     // Use the FourPlayerWebSocketSystem to connect
@@ -2467,9 +2480,14 @@ class FourPlayerWebSocketSystem {
 
     loadSettings() {
         try {
+            // Server URL is just the connection endpoint, not player identity -
+            // safe (and convenient) to share across tabs via localStorage.
+            // Room/name/uuid/seat are per-tab identity and use sessionStorage
+            // instead (see below), so opening a second tab/window on the same
+            // computer never collides with an already-connected player.
             const savedUrl = localStorage.getItem('ws_server_url');
-            const savedRoom = localStorage.getItem('ws_room_id');
-            const savedName = localStorage.getItem('ws_player_name');
+            const savedRoom = sessionStorage.getItem('ws_room_id');
+            const savedName = sessionStorage.getItem('ws_player_name');
 
             if (savedUrl) document.getElementById('serverUrl').value = savedUrl;
             if (savedRoom) document.getElementById('roomId').value = savedRoom;
@@ -2483,21 +2501,21 @@ class FourPlayerWebSocketSystem {
                 nameField.value = `Planeswalker${Math.floor(1000 + Math.random() * 9000)}`;
             }
 
-            if (!localStorage.getItem('ws_player_uuid')) {
-                localStorage.setItem('ws_player_uuid', crypto.randomUUID());
+            if (!sessionStorage.getItem('ws_player_uuid')) {
+                sessionStorage.setItem('ws_player_uuid', crypto.randomUUID());
             }
         } catch (e) {
-            console.log('localStorage not available');
+            console.log('sessionStorage not available');
         }
     }
 
     saveSettings() {
         try {
             localStorage.setItem('ws_server_url', document.getElementById('serverUrl').value);
-            localStorage.setItem('ws_room_id', document.getElementById('roomId').value);
-            localStorage.setItem('ws_player_name', document.getElementById('playerName').value);
+            sessionStorage.setItem('ws_room_id', document.getElementById('roomId').value);
+            sessionStorage.setItem('ws_player_name', document.getElementById('playerName').value);
         } catch (e) {
-            console.log('localStorage not available');
+            console.log('sessionStorage not available');
         }
     }
 
@@ -4324,12 +4342,12 @@ class FourPlayerWebSocketSystem {
         if (this.isConnected) {
             this.disconnect();
         } else {
-            // Check if we have reconnection info in localStorage
+            // Check if we have reconnection info in sessionStorage
             let hasReconnectInfo = false;
             try {
-                const savedSeat = localStorage.getItem('ws_seat_number');
-                const savedCode = localStorage.getItem('ws_game_code');
-                const savedSpectator = localStorage.getItem('ws_is_spectator');
+                const savedSeat = sessionStorage.getItem('ws_seat_number');
+                const savedCode = sessionStorage.getItem('ws_game_code');
+                const savedSpectator = sessionStorage.getItem('ws_is_spectator');
                 
                 if (savedSeat && savedCode) {
                     hasReconnectInfo = true;
@@ -4378,12 +4396,12 @@ class FourPlayerWebSocketSystem {
             return;
         }
 
-        // Try to restore seat and game code from localStorage if reconnecting
+        // Try to restore seat and game code from sessionStorage if reconnecting
         if (!this.seatNumber || !this.gameCode) {
             try {
-                const savedSeat = localStorage.getItem('ws_seat_number');
-                const savedCode = localStorage.getItem('ws_game_code');
-                const savedSpectator = localStorage.getItem('ws_is_spectator');
+                const savedSeat = sessionStorage.getItem('ws_seat_number');
+                const savedCode = sessionStorage.getItem('ws_game_code');
+                const savedSpectator = sessionStorage.getItem('ws_is_spectator');
                 
                 if (savedSeat && savedCode) {
                     this.seatNumber = parseInt(savedSeat);
@@ -4392,7 +4410,7 @@ class FourPlayerWebSocketSystem {
                     this.log(`🔄 Attempting to reconnect to seat ${this.seatNumber}...`);
                 }
             } catch (e) {
-                console.log('Could not restore connection info from localStorage');
+                console.log('Could not restore connection info from sessionStorage');
             }
         }
 
@@ -4457,14 +4475,14 @@ class FourPlayerWebSocketSystem {
         this.clearAllPlayerSlots();
         this.connectBtn.disabled = false;
         
-        // Clear ALL reconnection data from localStorage when user intentionally disconnects
+        // Clear ALL reconnection data from sessionStorage when user intentionally disconnects
         try {
-            localStorage.removeItem('ws_seat_number');
-            localStorage.removeItem('ws_game_code');
-            localStorage.removeItem('ws_is_spectator');
-            localStorage.removeItem('ws_player_uuid'); // Also clear UUID so they get a new identity
+            sessionStorage.removeItem('ws_seat_number');
+            sessionStorage.removeItem('ws_game_code');
+            sessionStorage.removeItem('ws_is_spectator');
+            sessionStorage.removeItem('ws_player_uuid'); // Also clear UUID so they get a new identity
         } catch (e) {
-            console.log('Could not clear localStorage');
+            console.log('Could not clear sessionStorage');
         }
         
         this.log('🚪 You have left the game');
@@ -4480,13 +4498,13 @@ class FourPlayerWebSocketSystem {
         this.log('🟢 Connected to WebSocket server');
 
         // Get or create UUID and save it
-        let uuid = localStorage.getItem('ws_player_uuid');
+        let uuid = sessionStorage.getItem('ws_player_uuid');
         if (!uuid) {
             uuid = crypto.randomUUID();
             try {
-                localStorage.setItem('ws_player_uuid', uuid);
+                sessionStorage.setItem('ws_player_uuid', uuid);
             } catch (e) {
-                console.log('localStorage not available for UUID storage');
+                console.log('sessionStorage not available for UUID storage');
             }
         }
 
@@ -5899,8 +5917,8 @@ updateOwnSlot() {
             
             // Check if reconnection info exists
             try {
-                const savedSeat = localStorage.getItem('ws_seat_number');
-                const savedCode = localStorage.getItem('ws_game_code');
+                const savedSeat = sessionStorage.getItem('ws_seat_number');
+                const savedCode = sessionStorage.getItem('ws_game_code');
                 
                 if (savedSeat && savedCode) {
                     this.connectBtn.textContent = '🔄 Reconnect (Seat ' + savedSeat + ')';
@@ -6705,7 +6723,7 @@ window.addEventListener('beforeunload', (e) => {
         // So we'll let the connection close naturally, and rely on the server's
         // 5-minute grace period to allow reconnection
         
-        // The UUID in localStorage will allow the player to reconnect to their seat
+        // The UUID in sessionStorage will allow the player to reconnect to their seat
     }
 });
 
@@ -6720,13 +6738,13 @@ window.addEventListener('beforeunload', (e) => {
 // and re-click it, it looked like refreshing just wiped your board.
 // This automatically does that same reconnect the instant the page
 // loads, so only an explicit Disconnect or an all-agreed Reset Game
-// (both of which clear these localStorage keys) can actually drop you.
+// (both of which clear these sessionStorage keys) can actually drop you.
 // ============================================================
 document.addEventListener('DOMContentLoaded', () => {
     try {
-        const savedSeat = localStorage.getItem('ws_seat_number');
-        const savedCode = localStorage.getItem('ws_game_code');
-        const savedSpectator = localStorage.getItem('ws_is_spectator');
+        const savedSeat = sessionStorage.getItem('ws_seat_number');
+        const savedCode = sessionStorage.getItem('ws_game_code');
+        const savedSpectator = sessionStorage.getItem('ws_is_spectator');
 
         if (savedSeat && savedCode && typeof fourPlayerSystem !== 'undefined') {
             fourPlayerSystem.log(`🔄 Restoring your previous session (Seat ${savedSeat})...`);
@@ -11053,8 +11071,8 @@ document.addEventListener('DOMContentLoaded', () => {
 // Check for reconnection info on page load
 document.addEventListener('DOMContentLoaded', () => {
     try {
-        const savedSeat = localStorage.getItem('ws_seat_number');
-        const savedCode = localStorage.getItem('ws_game_code');
+        const savedSeat = sessionStorage.getItem('ws_seat_number');
+        const savedCode = sessionStorage.getItem('ws_game_code');
         
         if (savedSeat && savedCode) {
             const connectBtn = document.getElementById('connectBtn');
@@ -11291,6 +11309,10 @@ document.addEventListener('DOMContentLoaded', () => {
                         ❌ Back
                     </button>
                 </div>
+                <p style="text-align:center; margin-top: 16px; color: #aaa; font-size: 0.9em;">
+                    Don't know the code?
+                    <a href="#" onclick="showSpectateView(); return false;" style="color:#FF9800; text-decoration:underline;">Join as a spectator instead</a>
+                </p>
             </div>
             
             <!-- SEAT SELECTION VIEW -->
