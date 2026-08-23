@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>4-Player MTG By Rob Sexton</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%83%8F%EF%B8%8F%3C/text%3E%3C/svg%3E">
     <style>
         * {
             margin: 0;
@@ -153,7 +154,19 @@
             gap: 15px;
             margin-bottom: 15px;
             min-height: 500px;
-            transition: all 0.3s ease;
+            /* BUGFIX: this used to be "transition: all 0.3s ease", which
+               animated grid-template-columns/rows over 300ms whenever
+               maximize/minimize/switch toggled the .maximized class. The
+               rescale logic only waits one requestAnimationFrame (~16ms)
+               before reading the container's clientWidth/clientHeight to
+               compute each projection's scale - so it was measuring a
+               mid-animation, not-yet-final size, producing a visibly wrong
+               scale ("size difference") that never corrected itself until
+               the next unrelated card update. Scoping the transition to
+               only cosmetic properties makes the grid resize instant, which
+               matches what the switch/maximize code already assumes.
+             */
+            transition: box-shadow 0.2s ease;
             isolation: isolate;
         }
         
@@ -560,6 +573,10 @@
         .projection-container {
             border: 2px solid #4CAF50;
             background: rgba(76, 175, 80, 0.05);
+            overflow: hidden; /* BUGFIX: cards positioned near the edge of a
+                remote player's board could render past the scaled-down
+                projection panel's boundary since nothing clipped them -
+                "phantom cards" bleeding outside the frame. */
         }
 
         .projection-container .card {
@@ -573,6 +590,7 @@
             border: 2px solid #FF9800;
             background: rgba(255, 152, 0, 0.05);
             position: relative;
+            overflow: hidden; /* same fix as .projection-container above */
         }
 
         .empty-slot {
@@ -1157,6 +1175,18 @@
             transform: rotate(90deg) scale(1.05) !important;
         }
 
+        /* BUGFIX: .selected (green border/glow) and .tapped (yellow
+           border/glow) both set border+box-shadow with !important, and
+           .tapped is more specific (two classes) so it always won -
+           tapping a selected card silently erased any sign it was still
+           selected. A dashed green outline is a separate box model layer
+           from border/box-shadow, so it can't be clobbered by either and
+           stays visible on top of the tapped glow. */
+        .card.tapped.selected {
+            outline: 3px dashed #4CAF50 !important;
+            outline-offset: 3px !important;
+        }
+
         .deck-playmat {
             background: linear-gradient(135deg, #2c3e50 0%, #34495e 100%);
             border: 3px dashed rgba(255, 255, 255, 0.3);
@@ -1476,6 +1506,244 @@
             font-size: 12px;
             font-weight: bold;
         }
+
+        /* ============================================================
+           3D DICE & COIN ANIMATIONS
+           Real CSS 3D (perspective + rotateX/Y/Z), not a physics engine -
+           a d6 gets an actual 6-faced cube; every other die type gets a
+           tumbling 3D token (there's no lightweight way to build accurate
+           tetrahedron/octahedron/dodecahedron/icosahedron meshes in pure
+           CSS, so those spin as a faceted-looking token rather than a
+           geometrically exact polyhedron). A coin gets a real two-sided
+           flip disc.
+           ============================================================ */
+        .dice-roll-stage {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 18px;
+            justify-content: center;
+            align-items: center;
+            min-height: 90px;
+            margin: 16px 0;
+            perspective: 600px;
+        }
+        .die-3d-scene {
+            width: 60px;
+            height: 60px;
+            perspective: 600px;
+        }
+        .die-cube {
+            position: relative;
+            width: 60px;
+            height: 60px;
+            transform-style: preserve-3d;
+            transform: rotateX(-20deg) rotateY(30deg);
+            animation: cubeTumble 0.9s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+        }
+        .die-cube-face {
+            position: absolute;
+            width: 60px;
+            height: 60px;
+            background: linear-gradient(145deg, #fdfdfd, #d8d8d8);
+            border: 2px solid #999;
+            border-radius: 8px;
+            box-shadow: inset 0 0 8px rgba(0,0,0,0.15);
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            grid-template-rows: repeat(3, 1fr);
+            place-items: center;
+            padding: 8px;
+            box-sizing: border-box;
+        }
+        .die-cube-face .pip {
+            width: 9px;
+            height: 9px;
+            border-radius: 50%;
+            background: #222;
+        }
+        .die-face-front  { transform: translateZ(30px); }
+        .die-face-back   { transform: rotateY(180deg) translateZ(30px); }
+        .die-face-right  { transform: rotateY(90deg) translateZ(30px); }
+        .die-face-left   { transform: rotateY(-90deg) translateZ(30px); }
+        .die-face-top    { transform: rotateX(90deg) translateZ(30px); }
+        .die-face-bottom { transform: rotateX(-90deg) translateZ(30px); }
+
+        @keyframes cubeTumble {
+            0%   { transform: rotateX(0deg) rotateY(0deg) rotateZ(0deg); }
+            100% { transform: var(--tumble-end, rotateX(720deg) rotateY(720deg) rotateZ(0deg)); }
+        }
+
+        .die-token-scene {
+            width: 64px;
+            height: 64px;
+            perspective: 500px;
+        }
+        .die-token {
+            width: 64px;
+            height: 64px;
+            border-radius: 16px;
+            background: linear-gradient(145deg, #7c4dff, #512da8);
+            border: 2px solid #b39ddb;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: bold;
+            font-size: 1.4em;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+            transform-style: preserve-3d;
+            animation: tokenTumble 0.9s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+        }
+        .die-token .die-token-sides {
+            font-size: 0.4em;
+            opacity: 0.75;
+            display: block;
+            font-weight: normal;
+        }
+        @keyframes tokenTumble {
+            0%   { transform: rotateX(0deg) rotateY(0deg); }
+            100% { transform: rotateX(var(--tx, 640deg)) rotateY(var(--ty, 720deg)); }
+        }
+
+        .coin-3d-scene {
+            width: 70px;
+            height: 70px;
+            perspective: 500px;
+        }
+        .coin-3d {
+            position: relative;
+            width: 70px;
+            height: 70px;
+            transform-style: preserve-3d;
+            animation: coinFlip 1s cubic-bezier(0.3, 0.9, 0.4, 1) forwards;
+        }
+        .coin-face {
+            position: absolute;
+            width: 70px;
+            height: 70px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.8em;
+            backface-visibility: hidden;
+            box-shadow: 0 4px 14px rgba(0,0,0,0.4);
+            border: 3px solid #FFC107;
+        }
+        .coin-heads { background: radial-gradient(circle at 35% 35%, #fff8dc, #d4af37); }
+        .coin-tails { background: radial-gradient(circle at 35% 35%, #e0e0e0, #9e9e9e); transform: rotateY(180deg); }
+        @keyframes coinFlip {
+            0%   { transform: rotateY(0deg); }
+            100% { transform: var(--coin-end, rotateY(1800deg)); }
+        }
+
+        .dice-result-badge {
+            text-align: center;
+            font-size: 0.72em;
+            color: #ccc;
+            margin-top: 4px;
+        }
+        .dice-group-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: rgba(255,255,255,0.1);
+            border: 1px solid rgba(255,255,255,0.25);
+            border-radius: 20px;
+            padding: 4px 10px;
+            font-size: 0.8em;
+            color: #fff;
+        }
+        .dice-group-chip button {
+            background: rgba(244,67,54,0.8);
+            border: none;
+            color: white;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            cursor: pointer;
+            font-size: 0.85em;
+            line-height: 1;
+            padding: 0;
+        }
+
+        /* Non-blocking toast used to show OTHER players' dice/coin rolls in
+           real time - unlike .modal, this never captures clicks, so it
+           can't interrupt whatever the viewer is doing on their own board.
+           .anchored variant sits directly over the roller's own projection
+           tile (instead of floating top-center) so it's immediately clear
+           whose roll it is, especially if two people roll at once. */
+        .shared-roll-toast {
+            position: fixed;
+            top: 16px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 5000;
+            pointer-events: none;
+            background: linear-gradient(135deg, rgba(44,62,80,0.96), rgba(52,73,94,0.96));
+            border: 2px solid rgba(255,255,255,0.25);
+            border-radius: 14px;
+            padding: 12px 20px 16px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            text-align: center;
+            animation: rollToastIn 0.25s ease-out;
+            max-width: 92vw;
+        }
+        .shared-roll-toast.anchored {
+            position: absolute;
+            inset: 0;
+            top: 0; left: 0; right: 0; bottom: 0;
+            transform: none;
+            width: auto;
+            max-width: none;
+            border-radius: inherit;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 50;
+            padding: 8px;
+            background: rgba(20, 25, 35, 0.88);
+            animation: rollToastFadeIn 0.2s ease-out;
+        }
+        .shared-roll-toast.anchored .dice-roll-stage,
+        .shared-roll-toast.anchored .die-3d-scene,
+        .shared-roll-toast.anchored .die-token-scene,
+        .shared-roll-toast.anchored .coin-3d-scene {
+            transform: scale(0.7);
+        }
+        .shared-roll-toast.fading {
+            animation: rollToastOut 0.4s ease-in forwards;
+        }
+        .shared-roll-toast .roll-toast-title {
+            color: #FFC107;
+            font-weight: bold;
+            font-size: 0.95em;
+            margin-bottom: 8px;
+            text-shadow: 0 2px 6px rgba(0,0,0,0.7);
+        }
+        .shared-roll-toast .dice-roll-stage {
+            margin: 6px 0;
+            min-height: unset;
+        }
+        .shared-roll-toast .roll-toast-summary {
+            color: #4ecdc4;
+            font-weight: bold;
+            margin-top: 4px;
+            font-size: 0.9em;
+        }
+        @keyframes rollToastIn {
+            from { opacity: 0; transform: translateX(-50%) translateY(-16px); }
+            to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+        }
+        @keyframes rollToastFadeIn {
+            from { opacity: 0; }
+            to   { opacity: 1; }
+        }
+        @keyframes rollToastOut {
+            from { opacity: 1; }
+            to   { opacity: 0; }
+        }
         
         /* Touch zoom overlay animations */
         @keyframes fadeIn {
@@ -1515,11 +1783,11 @@
                 </div>
                 <div class="input-group">
                     <label for="roomId">Room ID:</label>
-                    <input type="text" id="roomId" placeholder="Enter room ID" value="room123">
+                    <input type="text" id="roomId" placeholder="e.g. friday-night-magic" value="">
                 </div>
                 <div class="input-group">
                     <label for="playerName">Player Name:</label>
-                    <input type="text" id="playerName" placeholder="Your name" value="Player1">
+                    <input type="text" id="playerName" placeholder="Your name" value="">
                 </div>
             </div>
             
@@ -1684,7 +1952,7 @@
                 <div style="display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 10px;">
                     <h2 class="section-title" style="margin-bottom: 0;">🗄️ Deck <span class="zone-count" id="myDeckCount">0</span></h2>
                     <button id="shuffleDeckBtn" class="btn" style="padding:6px 12px;font-size:0.75em;background:linear-gradient(135deg,#9c27b0,#7b1fa2);border:none;color:white;border-radius:8px;cursor:pointer;white-space:nowrap;">🔀 Shuffle</button>
-                    <button onclick="flipCoin()" class="btn" style="padding:6px 12px;font-size:0.75em;background:linear-gradient(135deg,#FF9800,#F57C00);border:none;color:white;border-radius:8px;cursor:pointer;white-space:nowrap;">🪙 Flip Coin</button>
+                    <button onclick="openCoinFlipModal()" class="btn" style="padding:6px 12px;font-size:0.75em;background:linear-gradient(135deg,#FF9800,#F57C00);border:none;color:white;border-radius:8px;cursor:pointer;white-space:nowrap;">🪙 Flip Coin</button>
                     <button onclick="openDiceModal()" class="btn" style="padding:6px 12px;font-size:0.75em;background:linear-gradient(135deg,#2196F3,#1976D2);border:none;color:white;border-radius:8px;cursor:pointer;white-space:nowrap;">🎲 Roll Dice</button>
                 </div>
                 <div class="deck-life-row" id="deckLifeRow">
@@ -1748,9 +2016,11 @@
                     <span class="player-status player-online"></span>
                 </h2>
                 <div class="battlefield-controls">
+                    <button id="undoRemoveBtn" onclick="undoLastRemoval()" disabled style="opacity:0.5;">↶ Undo</button>
                     <button onclick="untapAllCards()">↩️ Untap All</button>
                     <button onclick="tapHighlighted()">🔄 Tap Highlighted</button>
                     <button onclick="openCountersModal()">⬟ Counters</button>
+                    <button onclick="openTradeModal()" style="background:rgba(255,193,7,0.2);border-color:#FFC107;">🤝 Trade</button>
                     <button onclick="openAddCardModal()" style="background:rgba(76,175,80,0.2);border-color:#4CAF50;">➕ Add New Card</button>
                     <button onclick="openTokenCreator()" style="background:rgba(33,150,243,0.2);border-color:#2196F3;">🎴 Create Token</button>
                     <button onclick="openImportDeckModal()" style="background:rgba(244,67,54,0.2);border-color:#F44336;">📥 Import Deck</button>
@@ -1816,8 +2086,16 @@
             <span class="close" onclick="closeTokenCreator()">&times;</span>
             <h2>🎴 Create Token</h2>
             <div style="display:flex;flex-direction:column;gap:12px;margin-top:20px;">
+                <div id="deckTokensSection" style="display:none;">
+                    <label style="color:#e0e0e0;font-size:0.9em;display:block;margin-bottom:5px;">🃏 Tokens Your Deck Makes</label>
+                    <div id="deckTokenChoices" style="display:flex;flex-wrap:wrap;gap:6px;"></div>
+                </div>
                 <div>
-                    <label style="color:#e0e0e0;font-size:0.9em;display:block;margin-bottom:5px;">Search for MTG Token</label>
+                    <label style="color:#e0e0e0;font-size:0.9em;display:block;margin-bottom:5px;">⭐ Common Tokens</label>
+                    <div id="commonTokenChoices" style="display:flex;flex-wrap:wrap;gap:6px;"></div>
+                </div>
+                <div>
+                    <label style="color:#e0e0e0;font-size:0.9em;display:block;margin-bottom:5px;">Search for Any MTG Token</label>
                     <input type="text" id="tokenSearch" placeholder="Search Scryfall for token..." style="width:100%;padding:8px;border-radius:6px;border:1px solid rgba(255,255,255,0.3);background:rgba(255,255,255,0.1);color:#fff;">
                     <div id="tokenSearchResults" style="max-height:200px;overflow-y:auto;margin-top:8px;display:none;"></div>
                 </div>
@@ -1849,8 +2127,69 @@
         </div>
     </div>
 
+    <!-- TRADE: step 1 - pick opponent and direction -->
+    <div id="tradeSetupModal" class="modal">
+        <div class="modal-content" style="max-width:420px;">
+            <span class="close" onclick="closeTradeSetup()">&times;</span>
+            <h2 style="color:#FFC107;">🤝 Trade Cards</h2>
+            <p style="color:#aaa;font-size:0.85em;margin-bottom:16px;">Take a card from an opponent's field (with their permission), or give one of your own cards to another player.</p>
+            <div style="margin-bottom:14px;">
+                <label style="color:#e0e0e0;font-size:0.9em;display:block;margin-bottom:6px;">Player</label>
+                <div id="tradePlayerChoices" style="display:flex;flex-wrap:wrap;gap:8px;"></div>
+            </div>
+            <div style="margin-bottom:14px;">
+                <label style="color:#e0e0e0;font-size:0.9em;display:block;margin-bottom:6px;">Direction</label>
+                <div style="display:flex;gap:16px;">
+                    <label class="checkbox-btn" style="color:#fff;cursor:pointer;">
+                        <input type="radio" name="tradeDirection" id="tradeDirTake" value="take" checked>
+                        📥 Take from their field
+                    </label>
+                    <label class="checkbox-btn" style="color:#fff;cursor:pointer;">
+                        <input type="radio" name="tradeDirection" id="tradeDirGive" value="give">
+                        🎁 Give from my field
+                    </label>
+                </div>
+            </div>
+            <div class="modal-buttons">
+                <button onclick="proceedToTradeSelection()" class="btn" style="background:linear-gradient(135deg,#FFC107,#FF9800);">Continue</button>
+                <button onclick="closeTradeSetup()" class="btn secondary">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- TRADE: step 2 - pick specific card(s) from whichever field applies -->
+    <div id="tradeCardsModal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="closeTradeCardsModal()">&times;</span>
+            <h2 id="tradeCardsModalTitle" style="color:#FFC107;">Select Card(s)</h2>
+            <div id="tradeCardsModalContent" style="display:flex;flex-wrap:wrap;gap:10px;justify-content:center;max-height:400px;overflow-y:auto;padding:10px;"></div>
+            <div class="modal-buttons" style="margin-top:14px;">
+                <button id="tradeConfirmBtn" onclick="confirmTradeSelection()" class="btn" disabled style="opacity:0.5;background:linear-gradient(135deg,#FFC107,#FF9800);">Confirm (<span id="tradeSelectedCount">0</span>)</button>
+                <button onclick="closeTradeCardsModal()" class="btn secondary">Cancel</button>
+            </div>
+        </div>
+    </div>
+
    
    <script>
+// ============================================================
+// SECURITY: HTML-escape helper
+// Player names and other player-supplied text arrive over the
+// WebSocket from other clients and are inserted into the DOM via
+// innerHTML in a few places. Always escape untrusted text before
+// interpolating it into an HTML string to prevent stored/reflected
+// XSS from a malicious or compromised peer.
+// ============================================================
+function escapeHtml(str) {
+    if (str === null || str === undefined) return '';
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
 // ============================================================
 // LOBBY SYSTEM - GAME CODE & SEAT MANAGEMENT
 // ============================================================
@@ -2135,6 +2474,14 @@ class FourPlayerWebSocketSystem {
             if (savedUrl) document.getElementById('serverUrl').value = savedUrl;
             if (savedRoom) document.getElementById('roomId').value = savedRoom;
             if (savedName) document.getElementById('playerName').value = savedName;
+
+            // QoL: give first-time visitors a unique-ish default name instead
+            // of a hardcoded "Player1"/"room123" that collides the moment two
+            // people try the app without editing the fields.
+            const nameField = document.getElementById('playerName');
+            if (!savedName && !nameField.value) {
+                nameField.value = `Planeswalker${Math.floor(1000 + Math.random() * 9000)}`;
+            }
 
             if (!localStorage.getItem('ws_player_uuid')) {
                 localStorage.setItem('ws_player_uuid', crypto.randomUUID());
@@ -4265,6 +4612,18 @@ class FourPlayerWebSocketSystem {
                 this.log(`📣 ${message.data.message}`);
                 break;
 
+            case 'dice_roll_broadcast':
+                if (message.data.playerId !== this.playerId) {
+                    showSharedDiceToast(message.data.playerId, message.data.playerName, message.data.resultsByGroup, message.data.grandTotal);
+                }
+                break;
+
+            case 'coin_flip_broadcast':
+                if (message.data.playerId !== this.playerId) {
+                    showSharedCoinToast(message.data.playerId, message.data.playerName, message.data.results);
+                }
+                break;
+
             case 'ready_status':
                 // Update player ready state
                 const readyPlayerId = message.data.playerId;
@@ -4428,6 +4787,22 @@ case 'container_state':
 
             case 'take_cards_response':
                 this.handleTakeCardsResponse(message.data);
+                break;
+
+            case 'execute_take_cards':
+                this.handleExecuteTakeCardsReceived(message.data);
+                break;
+
+            case 'request_give_cards':
+                this.handleGiveCardsRequest(message.data);
+                break;
+
+            case 'give_cards_response':
+                this.handleGiveCardsResponseReceived(message.data);
+                break;
+
+            case 'deliver_gift_cards':
+                this.handleDeliverGiftCardsReceived(message.data);
                 break;
 
             case 'request_player_refresh':
@@ -4624,7 +4999,42 @@ showPermissionModal(message, callback) {
 
     handleTakeCardsResponse(data) {
         const { allowed, zoneType, cardNames } = data;
-        
+
+        // Field-trade "take" flow (from the Trade button) uses this same
+        // permission round-trip but needs different execution logic than
+        // the older deck/graveyard/exile modal flow below.
+        if (window.pendingFieldTradeRequest) {
+            const { targetPlayerId, entries } = window.pendingFieldTradeRequest;
+            window.pendingFieldTradeRequest = null;
+
+            if (!allowed) {
+                this.log(`❌ Player ${targetPlayerId} denied the trade request`, 'error');
+                alert(`Player ${targetPlayerId} denied the trade request.`);
+                return;
+            }
+
+            this.log(`✅ Player ${targetPlayerId} allowed the trade - taking ${entries.length} card(s)`, 'info');
+
+            // Add local copies to our own field using the data we already
+            // have cached from their live (publicly visible) board state.
+            entries.forEach(({ cardData }) => {
+                createAndMoveCard(cardData, 'main');
+            });
+
+            // Tell their client which specific cards to remove from their
+            // own board. They own the removal + broadcast of their state.
+            const cardIds = entries.map(e => e.cardData.id).filter(Boolean);
+            if (cardIds.length) {
+                this.sendMessage({
+                    type: 'execute_take_cards',
+                    data: { targetPlayerId, cardIds }
+                });
+            }
+
+            this.broadcastContainerState();
+            return;
+        }
+
         if (!allowed) {
             this.log(`❌ Permission denied to take cards from ${zoneType}`, 'error');
             alert(`Permission denied to take cards from ${zoneType}`);
@@ -4669,6 +5079,92 @@ showPermissionModal(message, callback) {
         }
     }
 
+    // Received by the FIELD OWNER after they approved a "take" request and
+    // the taker picked specific cards: remove exactly those cards from our
+    // own board and broadcast our own updated state.
+    handleExecuteTakeCardsReceived(data) {
+        const { requestingPlayerId, cardIds } = data;
+        if (!Array.isArray(cardIds) || cardIds.length === 0) return;
+
+        let removed = 0;
+        cardIds.forEach(id => {
+            const card = this.mainContainer.querySelector(`.card[data-id="${CSS.escape(String(id))}"]`);
+            if (card) {
+                card.remove();
+                removed++;
+            }
+        });
+
+        if (removed > 0) {
+            this.log(`🤝 Player ${requestingPlayerId} took ${removed} card(s) from your field`, 'info');
+            this.broadcastContainerState();
+        }
+    }
+
+    // Received by the RECIPIENT of a gift request: ask them whether to
+    // accept it.
+    handleGiveCardsRequest(data) {
+        const { givingPlayerId, cardNames } = data;
+        const cardList = cardNames.join(', ');
+        this.showPermissionModal(
+            `Player ${givingPlayerId} wants to give you ${cardNames.length} card(s): ${cardList}. Accept?`,
+            (allowed) => {
+                if (allowed) {
+                    this.log(`✅ Accepted ${cardNames.length} gifted card(s) from Player ${givingPlayerId}`, 'info');
+                } else {
+                    this.log(`🚫 Declined the gift from Player ${givingPlayerId}`, 'warning');
+                }
+                this.sendMessage({
+                    type: 'give_cards_response',
+                    data: { givingPlayerId, allowed }
+                });
+            }
+        );
+    }
+
+    // Received by the GIVER once the recipient has responded.
+    handleGiveCardsResponseReceived(data) {
+        const { allowed, targetPlayerId } = data;
+        const pending = window.pendingFieldGiveRequest;
+        window.pendingFieldGiveRequest = null;
+
+        if (!pending) return;
+
+        if (!allowed) {
+            this.log(`❌ Player ${targetPlayerId} declined your gift`, 'warning');
+            alert(`Player ${targetPlayerId} declined your gift.`);
+            return;
+        }
+
+        // Remove the gifted cards from our own field first, then send the
+        // actual card data to the recipient so they can add it to theirs.
+        const deliveredCards = [];
+        pending.entries.forEach(({ cardData, originalCard }) => {
+            if (originalCard) originalCard.remove();
+            deliveredCards.push(cardData);
+        });
+
+        this.log(`🎁 Gave ${deliveredCards.length} card(s) to Player ${targetPlayerId}`);
+        this.broadcastContainerState();
+
+        this.sendMessage({
+            type: 'deliver_gift_cards',
+            data: { targetPlayerId, cards: deliveredCards }
+        });
+    }
+
+    // Received by the RECIPIENT after the giver has removed the cards from
+    // their own field: add them to our own field.
+    handleDeliverGiftCardsReceived(data) {
+        const { givingPlayerId, cards } = data;
+        if (!Array.isArray(cards) || cards.length === 0) return;
+
+        cards.forEach(cardData => createAndMoveCard(cardData, 'main'));
+
+        this.log(`🎁 Received ${cards.length} gifted card(s) from Player ${givingPlayerId}`, 'info');
+        this.broadcastContainerState();
+    }
+
     updatePlayerSlot(playerId, playerData) {
         const slot = this.playerSlots[playerId];
         if (!slot) return;
@@ -4682,7 +5178,7 @@ showPermissionModal(message, callback) {
         const emojis = { 1: '🎭', 2: '🎮', 3: '🎲', 4: '🎪' };
         const emoji = emojis[playerId] || '🎮';
         
-        slot.title.innerHTML = `${emoji} Player ${playerId} (${playerData.playerName}) <button onclick="maximizeProjection(${playerId})" title="Maximize View" style="background:rgba(33,150,243,0.2);border:1px solid #2196F3;color:white;padding:4px 8px;border-radius:6px;cursor:pointer;font-size:0.75em;margin-left:8px;vertical-align:middle;">🔍</button> <span class="player-status player-online" id="player${playerId}Status"></span>`;
+        slot.title.innerHTML = `${emoji} Player ${playerId} (${escapeHtml(playerData.playerName)}) <button onclick="maximizeProjection(${playerId})" title="Maximize View" style="background:rgba(33,150,243,0.2);border:1px solid #2196F3;color:white;padding:4px 8px;border-radius:6px;cursor:pointer;font-size:0.75em;margin-left:8px;vertical-align:middle;">🔍</button> <span class="player-status player-online" id="player${playerId}Status"></span>`;
         slot.status.className = 'player-status player-online';
 
         slot.container.classList.remove('empty-slot');
@@ -5571,6 +6067,16 @@ updateOwnSlot() {
                         if (cardData.addedCard) {
                             card.classList.add('added-card');
                         }
+
+                        // BUGFIX: this manual rebuild used to skip the P/T
+                        // badge, counter overlay, and right-click menu that
+                        // every other card gets - a reconnect used to
+                        // silently drop those. Wire them up the same way
+                        // createCardFromData/addCardOverlays do.
+                        card.addEventListener('contextmenu', this.handleCardRightClick.bind(this));
+                        try { addCardOverlays(card); } catch (overlayError) {
+                            console.error('Error adding overlays to restored card:', overlayError);
+                        }
                         
                         this.mainContainer.appendChild(card);
                         restoredCards++;
@@ -5830,6 +6336,29 @@ updateOwnSlot() {
 
 const fourPlayerSystem = new FourPlayerWebSocketSystem();
 
+// ============================================================
+// GLOBAL ERROR HANDLING
+// Uncaught errors previously vanished into the browser console,
+// so a broken drag/drop or a bad card fetch would look like the
+// app just "did nothing." Surface them in the on-screen log too,
+// so players (and whoever is troubleshooting) can actually see
+// what went wrong without opening devtools.
+// ============================================================
+window.addEventListener('error', (e) => {
+    console.error('Uncaught error:', e.error || e.message);
+    if (typeof fourPlayerSystem !== 'undefined' && fourPlayerSystem.log) {
+        fourPlayerSystem.log(`⚠️ Unexpected error: ${e.message}`, 'error');
+    }
+});
+
+window.addEventListener('unhandledrejection', (e) => {
+    console.error('Unhandled promise rejection:', e.reason);
+    if (typeof fourPlayerSystem !== 'undefined' && fourPlayerSystem.log) {
+        const reason = e.reason && e.reason.message ? e.reason.message : String(e.reason);
+        fourPlayerSystem.log(`⚠️ Unexpected error: ${reason}`, 'error');
+    }
+});
+
 function toggleConnection() {
     fourPlayerSystem.toggleConnection();
 }
@@ -5873,7 +6402,11 @@ async function fetchCard(card) {
         id: d.id,
         mana: d.mana_cost || '',
         pt: d.type_line.includes('Creature') && d.power && d.toughness ? `${d.power}/${d.toughness}` : '',
-        loyalty: d.loyalty || ''
+        loyalty: d.loyalty || '',
+        // Scryfall lists any tokens a card can create/transform into here.
+        // We keep it so the token creator can offer "tokens your deck makes"
+        // without a second round of API calls per card.
+        all_parts: (d.all_parts || []).filter(p => p.component === 'token')
     };
 }
 
@@ -5989,21 +6522,48 @@ function updateMyDeckCount() {
         if (!list.length) return alert('Empty list!');
         loadBox.style.display = 'block';
         confirm.disabled = true;
-        confirm.textContent = 'Importing…';
 
         try {
-            const fetched = await Promise.all(list.map(nm => fetchCard(nm).catch(() => null)));
+            // Fetch cards in small throttled batches instead of firing every
+            // request at once. Scryfall asks API consumers to keep requests
+            // to roughly 10/second - a large decklist (100+ cards) sent as a
+            // single Promise.all() can get rate-limited or silently drop
+            // cards. Batching also lets us show real import progress.
+            const BATCH_SIZE = 8;
+            const BATCH_DELAY_MS = 120;
+            const fetched = [];
+            let failedNames = [];
+
+            for (let i = 0; i < list.length; i += BATCH_SIZE) {
+                const batch = list.slice(i, i + BATCH_SIZE);
+                confirm.textContent = `Importing… (${Math.min(i + BATCH_SIZE, list.length)}/${list.length})`;
+
+                const results = await Promise.all(batch.map(nm =>
+                    fetchCard(nm).catch(() => { failedNames.push(nm); return null; })
+                ));
+                results.forEach(c => c && fetched.push(c));
+
+                if (i + BATCH_SIZE < list.length) {
+                    await new Promise(res => setTimeout(res, BATCH_DELAY_MS));
+                }
+            }
+
             deckData.length = 0;
-            fetched.forEach(c => c && deckData.push(c));
+            fetched.forEach(c => deckData.push(c));
 
             const deckZone = document.getElementById('deck1');
             if (deckCardElement) deckCardElement.remove();
-            deckCardElement = createDeckCard(deckData.length);
+            deckCardElement = deckData.length ? createDeckCard(deckData.length) : null;
 
-            deckZone.appendChild(deckCardElement);
+            if (deckCardElement) deckZone.appendChild(deckCardElement);
 
             updateMyDeckCount();
-            alert(`Imported ${deckData.length} cards.`);
+
+            if (failedNames.length) {
+                alert(`Imported ${deckData.length} card(s). ${failedNames.length} card name(s) could not be found and were skipped:\n${failedNames.join(', ')}`);
+            } else {
+                alert(`Imported ${deckData.length} cards.`);
+            }
             close();
         } catch (e) {
             alert('Import failed: ' + e.message);
@@ -6022,6 +6582,14 @@ document.addEventListener('keydown', (e) => {
     }
     
     if (e.key === 'Escape') {
+        // Close any currently-open modal dialog first (lobby, zone viewer,
+        // deck import, token creator, life/counter editors, etc). Falls
+        // through to clearing card selection if nothing is open.
+        const openModal = Array.from(document.querySelectorAll('.modal'))
+            .find(m => getComputedStyle(m).display !== 'none');
+        if (openModal) {
+            openModal.style.display = 'none';
+        }
         fourPlayerSystem.clearSelection();
     } else if (e.key === 'a' && (e.ctrlKey || e.metaKey)) {
         e.preventDefault();
@@ -6092,6 +6660,37 @@ window.addEventListener('beforeunload', (e) => {
     }
 });
 
+// ============================================================
+// AUTO-RECONNECT ON PAGE LOAD
+// Previously a refresh would just drop you at the lobby screen - the
+// server kept your seat and board state for 5 minutes (see the
+// disconnectedPlayers grace period), and clicking "Connect" again would
+// correctly restore everything via toggleConnection()'s existing
+// saved-seat check below, but that reconnect only ever fired on a manual
+// click. If you didn't notice the button now said "Reconnect (Seat N)"
+// and re-click it, it looked like refreshing just wiped your board.
+// This automatically does that same reconnect the instant the page
+// loads, so only an explicit Disconnect or an all-agreed Reset Game
+// (both of which clear these localStorage keys) can actually drop you.
+// ============================================================
+document.addEventListener('DOMContentLoaded', () => {
+    try {
+        const savedSeat = localStorage.getItem('ws_seat_number');
+        const savedCode = localStorage.getItem('ws_game_code');
+        const savedSpectator = localStorage.getItem('ws_is_spectator');
+
+        if (savedSeat && savedCode && typeof fourPlayerSystem !== 'undefined') {
+            fourPlayerSystem.log(`🔄 Restoring your previous session (Seat ${savedSeat})...`);
+            fourPlayerSystem.seatNumber = parseInt(savedSeat);
+            fourPlayerSystem.gameCode = savedCode;
+            fourPlayerSystem.isSpectator = savedSpectator === 'true';
+            fourPlayerSystem.connect();
+        }
+    } catch (e) {
+        console.log('Auto-reconnect check failed', e);
+    }
+});
+
 document.addEventListener('visibilitychange', () => {
     if (document.hidden) {
         fourPlayerSystem.log('📱 Tab hidden - connection maintained');
@@ -6158,9 +6757,11 @@ function addCardToZone(card, zoneElement, placement = 'top') {
     };
 
     if (zoneType === 'command') {
+        // MTG's Partner mechanic lets a player run two commanders, so the
+        // command zone needs to hold up to 2 cards, not just 1.
         const existingCards = zoneElement.querySelectorAll('.card');
-        if (existingCards.length > 0) {
-            fourPlayerSystem.log('❌ Command zone already occupied', 'error');
+        if (existingCards.length >= 2) {
+            fourPlayerSystem.log('❌ Command zone is full (max 2, for Partner commanders)', 'error');
             return false;
         }
     }
@@ -6297,6 +6898,28 @@ function showZoneModal(zoneId) {
     const handCheck = document.getElementById('modalDestHand');
     const mainCheck = document.getElementById('modalDestMain');
 
+    // BUGFIX: destination used to be captured per-card at the moment you
+    // clicked it, so switching Hand/Main *after* selecting cards had no
+    // effect on those cards - they'd silently move to whatever was checked
+    // when you first clicked them, even though the radio visibly showed the
+    // new choice. "Move Selected" now always uses whichever destination is
+    // checked at the moment you actually click the Move button, and
+    // switching the radio live-updates the highlight color of every
+    // already-selected card so it's obvious where they'll go.
+    const refreshSelectedCardHighlights = () => {
+        const destination = handCheck.checked ? 'hand' : 'main';
+        const borderColor = destination === 'hand' ? '#2196F3' : '#4CAF50';
+        const boxShadow = destination === 'hand' ? '0 0 10px rgba(33, 150, 243, 0.5)' : '0 0 10px rgba(76, 175, 80, 0.5)';
+        document.querySelectorAll('.modal-card').forEach(cardDiv => {
+            if (cardDiv.selectedData) {
+                cardDiv.style.border = `2px solid ${borderColor}`;
+                cardDiv.style.boxShadow = boxShadow;
+            }
+        });
+    };
+    handCheck.addEventListener('change', refreshSelectedCardHighlights);
+    mainCheck.addEventListener('change', refreshSelectedCardHighlights);
+
     document.getElementById('modalMoveBtn').addEventListener('click', () => {
         const destination = handCheck.checked ? 'hand' : 'main';
         moveSelectedCardsToContainer(destination, zone);
@@ -6397,7 +7020,11 @@ function toggleModalCardSelection(cardDiv, cardData, index, originalCard) {
     const handCheck = document.getElementById('modalDestHand');
     const mainCheck = document.getElementById('modalDestMain');
 
-    // Determine destination based on which radio button is selected
+    // Determine highlight color from whichever radio is checked right now.
+    // NOTE: this is only for visual feedback at the moment of selection -
+    // the actual move destination is decided fresh when "Move Selected" is
+    // clicked (see moveSelectedCardsToContainer), so switching Hand/Main
+    // after selecting cards still sends them to the right place.
     const destination = handCheck.checked ? 'hand' : 'main';
     const borderColor = destination === 'hand' ? '#2196F3' : '#4CAF50';
     const boxShadow = destination === 'hand' ? '0 0 10px rgba(33, 150, 243, 0.5)' : '0 0 10px rgba(76, 175, 80, 0.5)';
@@ -6410,9 +7037,12 @@ function toggleModalCardSelection(cardDiv, cardData, index, originalCard) {
         cardDiv.style.boxShadow = 'none';
         delete cardDiv.selectedData;
     } else {
-        // Select with current destination
+        // Select. We intentionally do NOT bake the destination into
+        // selectedData here - moveSelectedCardsToContainer always applies
+        // whichever destination is current at move-time to every selected
+        // card, so this object just needs to mark the card as selected.
         window.selectedModalCards.add(cardKey);
-        cardDiv.selectedData = { cardData, index, originalCard, destination };
+        cardDiv.selectedData = { cardData, index, originalCard };
         cardDiv.style.border = `2px solid ${borderColor}`;
         cardDiv.style.boxShadow = boxShadow;
     }
@@ -6424,6 +7054,12 @@ function toggleModalCardSelection(cardDiv, cardData, index, originalCard) {
 }
 
 function moveSelectedCardsToContainer(containerType, originalZone) {
+    // "containerType" here is the destination chosen at the moment "Move
+    // Selected" was clicked (see the click handler in showZoneModal), and
+    // now applies uniformly to every selected card - see the bugfix notes
+    // in toggleModalCardSelection above.
+    const targetDestination = containerType;
+
     const selectedCards = Array.from(document.querySelectorAll('.modal-card')).filter(card => {
         // Reconstruct the key the same way it was created in toggleModalCardSelection
         const dataId = card.getAttribute('data-id');
@@ -6432,36 +7068,42 @@ function moveSelectedCardsToContainer(containerType, originalZone) {
         return window.selectedModalCards.has(cardKey);
     });
 
-    selectedCards.forEach(cardDiv => {
-        const { cardData, index, originalCard, destination } = cardDiv.selectedData;
-        
-        // Use destination from selection if available, otherwise use containerType
-        const targetDestination = destination || containerType;
+    // BUGFIX: deck cards used to be removed with deckData.splice(index, 1)
+    // inside this same forEach, using each card's index captured back when
+    // it was selected. Removing an earlier card shifts every later index
+    // down by one, so selecting 2+ non-adjacent deck cards would silently
+    // pull the WRONG card for every selection after the first. Sorting
+    // deck removals by descending index before splicing avoids that.
+    const deckCards = selectedCards
+        .filter(cardDiv => cardDiv.dataset.cardType === 'deck')
+        .sort((a, b) => Number(b.dataset.cardIndex) - Number(a.dataset.cardIndex));
+    const zoneCards = selectedCards.filter(cardDiv => cardDiv.dataset.cardType !== 'deck');
 
-        if (cardDiv.dataset.cardType === 'deck') {
-            const retrievedData = deckData.splice(index, 1)[0];
+    deckCards.forEach(cardDiv => {
+        const { index } = cardDiv.selectedData;
+        const retrievedData = deckData.splice(index, 1)[0];
+        if (retrievedData) {
             createAndMoveCard(retrievedData, targetDestination);
+        }
+    });
+    if (deckCards.length) {
+        if (deckData.length === 0 && deckCardElement) {
+            deckCardElement.remove();
+            deckCardElement = null;
+        }
+        updateMyDeckCount();
+    }
 
-            if (deckData.length === 0 && deckCardElement) {
-                deckCardElement.remove();
-                deckCardElement = null;
-            }
-            updateMyDeckCount();
-        } else {
-            if (targetDestination === 'both') {
-                createAndMoveCard(cardData, 'hand');
-                createAndMoveCard({...cardData, id: uid()}, 'main'); // Clone for second destination
-            } else {
-                createAndMoveCard(cardData, targetDestination);
-            }
-            
-            if (originalCard) {
-                originalCard.remove();
-                if (originalZone.dataset.zone === 'command') {
-                    const remainingCards = originalZone.querySelectorAll('.card');
-                    if (remainingCards.length === 0) {
-                        originalZone.classList.remove('occupied');
-                    }
+    zoneCards.forEach(cardDiv => {
+        const { cardData, originalCard } = cardDiv.selectedData;
+        createAndMoveCard(cardData, targetDestination);
+
+        if (originalCard) {
+            originalCard.remove();
+            if (originalZone.dataset.zone === 'command') {
+                const remainingCards = originalZone.querySelectorAll('.card');
+                if (remainingCards.length === 0) {
+                    originalZone.classList.remove('occupied');
                 }
             }
         }
@@ -6473,7 +7115,7 @@ function moveSelectedCardsToContainer(containerType, originalZone) {
     closeZoneModal();
 }
 
-function createAndMoveCard(cardData, containerType) {
+function createAndMoveCard(cardData, containerType, savedX = null, savedY = null, savedTapped = false) {
     const newCard = createCardFromData(cardData);
     
     // Add P/T and counter overlays
@@ -6486,17 +7128,27 @@ function createAndMoveCard(cardData, containerType) {
     } else {
         fourPlayerSystem.mainContainer.appendChild(newCard);
 
-        const randomX = Math.random() * (fourPlayerSystem.mainContainer.offsetWidth - 100);
-        const randomY = Math.random() * (fourPlayerSystem.mainContainer.offsetHeight - 140);
+        // Restore the card's saved position when we have one (e.g. loading a
+        // saved game); otherwise fall back to a random spot on the field.
+        const hasSavedPosition = savedX !== null && savedY !== null && savedX !== '' && savedY !== '';
+        const posX = hasSavedPosition ? parseFloat(savedX) : Math.random() * (fourPlayerSystem.mainContainer.offsetWidth - 100);
+        const posY = hasSavedPosition ? parseFloat(savedY) : Math.random() * (fourPlayerSystem.mainContainer.offsetHeight - 140);
 
         newCard.style.position = 'absolute';
-        newCard.style.left = `${randomX}px`;
-        newCard.style.top = `${randomY}px`;
-        newCard.dataset.x = randomX;
-        newCard.dataset.y = randomY;
+        newCard.style.left = `${posX}px`;
+        newCard.style.top = `${posY}px`;
+        newCard.dataset.x = posX;
+        newCard.dataset.y = posY;
+
+        // Restore tapped state if this card was saved while tapped
+        if (savedTapped) {
+            newCard.classList.add('tapped');
+        }
 
         fourPlayerSystem.broadcastContainerState();
     }
+
+    return newCard;
 }
 
 function retrieveCardFromDeck(deckIndex) {
@@ -6718,6 +7370,7 @@ function createRemoteModalCard(cardData, index, playerId, zoneType, canTakeCards
     cardDiv.style.cursor = canTakeCards ? 'pointer' : 'default';
     cardDiv.style.border = '2px solid transparent';
     cardDiv.style.transition = 'all 0.2s ease';
+    cardDiv.setAttribute('data-id', cardData.id || '');
     cardDiv.dataset.name = cardData.name;
     cardDiv.dataset.mana = cardData.mana || '';
     cardDiv.dataset.pt = cardData.pt || '';
@@ -6736,16 +7389,15 @@ function createRemoteModalCard(cardData, index, playerId, zoneType, canTakeCards
     }
 
     if (canTakeCards) {
+        // BUGFIX: this used to require holding Ctrl/Cmd while clicking to
+        // select a card, with no UI hint that the modifier key was needed -
+        // a plain click just logged text and looked like nothing happened.
+        // A plain click now toggles selection directly, matching how the
+        // player's own zone-viewer modal already behaves.
         cardDiv.addEventListener('click', (e) => {
             e.preventDefault();
             e.stopPropagation();
-
-            if (e.ctrlKey || e.metaKey) {
-                toggleRemoteModalCardSelection(cardDiv, cardData, index);
-            } else {
-                // Single click - just show info
-                fourPlayerSystem.log(`📋 ${cardData.name} from Player ${playerId}'s ${zoneType}`);
-            }
+            toggleRemoteModalCardSelection(cardDiv, cardData, index);
         });
     }
 
@@ -6774,9 +7426,17 @@ function toggleRemoteModalCardSelection(cardDiv, cardData, index) {
 }
 
 function moveRemoteCardsToContainer(containerType, playerId, zoneType) {
-    const selectedCards = Array.from(document.querySelectorAll('.modal-card')).filter(card =>
-        window.selectedModalCards.has(`${card.dataset.name}_${card.dataset.cardIndex}`)
-    );
+    // BUGFIX: this used to rebuild the lookup key as `${card.dataset.name}_${index}`,
+    // but toggleRemoteModalCardSelection stores selections under
+    // `${cardData.id || cardData.name}_${index}` - for any card with a real
+    // Scryfall id those two keys never matched, so selectedCards always came
+    // back empty and "To Hand"/"To Main" silently did nothing. Rebuild the
+    // key the same way it was created.
+    const selectedCards = Array.from(document.querySelectorAll('.modal-card')).filter(card => {
+        const cardId = card.getAttribute('data-id');
+        const key = `${(cardId && cardId !== '') ? cardId : card.dataset.name}_${card.dataset.cardIndex}`;
+        return window.selectedModalCards.has(key);
+    });
 
     if (selectedCards.length === 0) return;
 
@@ -6804,6 +7464,197 @@ function moveRemoteCardsToContainer(containerType, playerId, zoneType) {
 
     // Close modal while waiting for response
     closeZoneModal();
+}
+
+// ============================================================
+// FIELD TRADE (give/take cards between players' battlefields)
+// ============================================================
+window.tradeState = { direction: 'take', targetPlayerId: null };
+window.selectedTradeCards = new Set();
+window.pendingFieldTradeRequest = null; // set while waiting on a "take" permission response
+
+function openTradeModal() {
+    const container = document.getElementById('tradePlayerChoices');
+    container.innerHTML = '';
+
+    const myId = fourPlayerSystem.playerId;
+    const others = Array.from(fourPlayerSystem.connectedPlayers.values())
+        .filter(p => p.playerId !== myId);
+
+    if (others.length === 0) {
+        container.innerHTML = '<div style="color:#aaa;font-size:0.85em;">No other players connected yet.</div>';
+    } else {
+        others.forEach(p => {
+            const btn = document.createElement('button');
+            btn.className = 'btn';
+            btn.textContent = `Player ${p.playerId} (${p.playerName || 'Unnamed'})`;
+            btn.style.cssText = 'padding:8px 14px;font-size:0.85em;';
+            btn.dataset.playerId = p.playerId;
+            btn.addEventListener('click', () => {
+                container.querySelectorAll('button').forEach(b => b.style.outline = 'none');
+                btn.style.outline = '2px solid #FFC107';
+                window.tradeState.targetPlayerId = p.playerId;
+            });
+            container.appendChild(btn);
+        });
+        // Default-select the first opponent
+        window.tradeState.targetPlayerId = others[0].playerId;
+        container.firstChild.style.outline = '2px solid #FFC107';
+    }
+
+    document.getElementById('tradeSetupModal').style.display = 'block';
+}
+
+function closeTradeSetup() {
+    document.getElementById('tradeSetupModal').style.display = 'none';
+}
+
+function closeTradeCardsModal() {
+    document.getElementById('tradeCardsModal').style.display = 'none';
+    window.selectedTradeCards = new Set();
+}
+
+function proceedToTradeSelection() {
+    const direction = document.getElementById('tradeDirTake').checked ? 'take' : 'give';
+    const targetPlayerId = window.tradeState.targetPlayerId;
+
+    if (!targetPlayerId) {
+        alert('Pick a player first.');
+        return;
+    }
+
+    window.tradeState.direction = direction;
+    window.selectedTradeCards = new Set();
+
+    const title = document.getElementById('tradeCardsModalTitle');
+    const content = document.getElementById('tradeCardsModalContent');
+    content.innerHTML = '';
+
+    let cards;
+    if (direction === 'take') {
+        const targetPlayer = fourPlayerSystem.connectedPlayers.get(targetPlayerId);
+        cards = ((targetPlayer && targetPlayer.containerState) || []).filter(c => c.type !== 'counter');
+        title.textContent = `📥 Take from Player ${targetPlayerId}'s Field`;
+        if (cards.length === 0) {
+            content.innerHTML = '<div style="color:#aaa;">That player has no cards on their field right now.</div>';
+        }
+        cards.forEach((cardData, index) => {
+            const cardDiv = document.createElement('div');
+            cardDiv.className = 'card trade-card';
+            cardDiv.style.cssText = 'position:relative;transform:scale(0.8);margin:5px;cursor:pointer;border:2px solid transparent;transition:all 0.2s ease;';
+            cardDiv.dataset.index = index;
+            if (cardData.src) {
+                const img = document.createElement('img');
+                img.src = cardData.src;
+                img.style.cssText = 'width:100%;height:100%;object-fit:cover;';
+                cardDiv.appendChild(img);
+            } else {
+                cardDiv.textContent = cardData.name || 'Card';
+            }
+            cardDiv.addEventListener('click', () => toggleTradeCardSelection(cardDiv, { cardData, index }));
+            content.appendChild(cardDiv);
+        });
+    } else {
+        // Give: pick from my own field
+        const myCards = Array.from(fourPlayerSystem.mainContainer.querySelectorAll('.card'));
+        title.textContent = `🎁 Give to Player ${targetPlayerId}`;
+        if (myCards.length === 0) {
+            content.innerHTML = '<div style="color:#aaa;">You have no cards on your field right now.</div>';
+        }
+        myCards.forEach((card, index) => {
+            const cardData = {
+                id: card.getAttribute('data-id'),
+                name: card.dataset.name || '',
+                src: card.querySelector('img')?.src || '',
+                mana: card.dataset.mana || '',
+                pt: card.dataset.pt || ''
+            };
+            const cardDiv = document.createElement('div');
+            cardDiv.className = 'card trade-card';
+            cardDiv.style.cssText = 'position:relative;transform:scale(0.8);margin:5px;cursor:pointer;border:2px solid transparent;transition:all 0.2s ease;';
+            cardDiv.dataset.index = index;
+            if (cardData.src) {
+                const img = document.createElement('img');
+                img.src = cardData.src;
+                img.style.cssText = 'width:100%;height:100%;object-fit:cover;';
+                cardDiv.appendChild(img);
+            } else {
+                cardDiv.textContent = cardData.name || 'Card';
+            }
+            cardDiv.addEventListener('click', () => toggleTradeCardSelection(cardDiv, { cardData, index, originalCard: card }));
+            content.appendChild(cardDiv);
+        });
+    }
+
+    closeTradeSetup();
+    document.getElementById('tradeCardsModal').style.display = 'block';
+}
+
+function toggleTradeCardSelection(cardDiv, entry) {
+    const key = cardDiv.dataset.index;
+    if (window.selectedTradeCards.has(key)) {
+        window.selectedTradeCards.delete(key);
+        cardDiv.style.border = '2px solid transparent';
+        cardDiv.style.boxShadow = 'none';
+        delete cardDiv.tradeData;
+    } else {
+        window.selectedTradeCards.add(key);
+        cardDiv.tradeData = entry;
+        cardDiv.style.border = '2px solid #FFC107';
+        cardDiv.style.boxShadow = '0 0 10px rgba(255, 193, 7, 0.6)';
+    }
+    const count = window.selectedTradeCards.size;
+    document.getElementById('tradeSelectedCount').textContent = count;
+    document.getElementById('tradeConfirmBtn').disabled = count === 0;
+    document.getElementById('tradeConfirmBtn').style.opacity = count === 0 ? '0.5' : '1';
+}
+
+function confirmTradeSelection() {
+    const selectedDivs = Array.from(document.querySelectorAll('.trade-card')).filter(d =>
+        window.selectedTradeCards.has(d.dataset.index)
+    );
+    if (selectedDivs.length === 0) return;
+
+    const targetPlayerId = window.tradeState.targetPlayerId;
+    const direction = window.tradeState.direction;
+
+    if (direction === 'take') {
+        // Ask the target's permission first (reuses the existing take-cards
+        // permission flow - same confirm() prompt already used for
+        // deck/graveyard/exile takes, just with zoneType 'field').
+        const entries = selectedDivs.map(d => d.tradeData);
+        window.pendingFieldTradeRequest = {
+            targetPlayerId,
+            entries
+        };
+        fourPlayerSystem.log(`📨 Requesting permission to take ${entries.length} card(s) from Player ${targetPlayerId}'s field...`);
+        fourPlayerSystem.sendMessage({
+            type: 'request_take_cards',
+            data: {
+                targetPlayerId,
+                zoneType: 'field',
+                cardCount: entries.length,
+                cardNames: entries.map(e => e.cardData.name)
+            }
+        });
+    } else {
+        // Give: ask the recipient's permission before pushing cards at them.
+        const entries = selectedDivs.map(d => d.tradeData);
+        window.pendingFieldGiveRequest = {
+            targetPlayerId,
+            entries
+        };
+        fourPlayerSystem.log(`📨 Asking Player ${targetPlayerId} if they'll accept ${entries.length} gifted card(s)...`);
+        fourPlayerSystem.sendMessage({
+            type: 'request_give_cards',
+            data: {
+                targetPlayerId,
+                cardNames: entries.map(e => e.cardData.name)
+            }
+        });
+    }
+
+    closeTradeCardsModal();
 }
 
 (function enableCardPreview() {
@@ -6881,8 +7732,13 @@ function moveRemoteCardsToContainer(containerType, playerId, zoneType) {
     const containers = [
         document.getElementById('mainContainer'),
         document.getElementById('handContainer'),
+        // BUGFIX: the deck/graveyard/exile/command pile section (which
+        // shows real card art, e.g. the top card of your graveyard) was
+        // never added here, so Shift-hover zoom silently did nothing
+        // anywhere in that section.
+        document.getElementById('deckPlaymat1'),
         ...Array.from(document.querySelectorAll('.remote-player-container'))
-    ];
+    ].filter(Boolean);
     
     // Add modal content for shift preview
     function setupModalPreview() {
@@ -7267,14 +8123,18 @@ document.addEventListener('DOMContentLoaded', function enableFullCardViewer() {
             }
         }
 
-        // ── X + click  →  remove card (with confirm modal) ──
+        // ── X + click  →  remove card (skips confirmation for tokens/copies) ──
         if (window.xKeyPressed) {
             const card = e.target.closest('.card');
             if (card && !card.classList.contains('deck-back') &&
                 (fourPlayerSystem.mainContainer.contains(card) || fourPlayerSystem.handContainer.contains(card))) {
                 e.preventDefault();
                 e.stopPropagation();
-                openConfirmRemove(card);
+                if (card.dataset.isToken === 'true' || card.dataset.isCopy === 'true') {
+                    removeCardNoConfirm(card);
+                } else {
+                    openConfirmRemove(card);
+                }
                 return;
             }
         }
@@ -7338,8 +8198,104 @@ document.addEventListener('DOMContentLoaded', function enableFullCardViewer() {
 // ============================================================
 // TOKEN CREATOR
 // ============================================================
+// Curated list of commonly-produced MTG tokens. Clicking one runs a quick
+// Scryfall lookup and auto-selects the first (most representative) match,
+// same as picking a result from the free-text search below.
+const COMMON_MTG_TOKENS = [
+    'Treasure', 'Clue', 'Food', 'Blood', 'Powerstone',
+    'Soldier', 'Zombie', 'Spirit', 'Beast', 'Elf Warrior',
+    'Angel', 'Wolf', 'Squirrel', 'Saproling', 'Goblin',
+    'Human Warrior', 'Vampire', 'Elemental', 'Construct', 'Insect'
+];
+
+async function quickSelectToken(tokenName, buttonEl) {
+    const originalText = buttonEl ? buttonEl.textContent : '';
+    if (buttonEl) { buttonEl.disabled = true; buttonEl.textContent = '…'; }
+    try {
+        const resp = await fetch(`https://api.scryfall.com/cards/search?q=t:token+"${encodeURIComponent(tokenName)}"&order=name&unique=cards`);
+        if (!resp.ok) throw new Error('not found');
+        const data = await resp.json();
+        const card = data.data && data.data[0];
+        if (!card) {
+            fourPlayerSystem.log(`⚠️ No token found matching "${tokenName}"`, 'warning');
+            return;
+        }
+        window.selectedTokenData = card;
+        const createBtn = document.getElementById('createTokenBtn');
+        if (createBtn) { createBtn.disabled = false; createBtn.style.opacity = '1'; }
+        document.getElementById('tokenSearch').value = card.name;
+        document.getElementById('tokenSearchResults').style.display = 'none';
+        document.getElementById('tokenSearchResults').innerHTML = '';
+    } catch (e) {
+        fourPlayerSystem.log(`⚠️ Token lookup failed for "${tokenName}"`, 'warning');
+    } finally {
+        if (buttonEl) { buttonEl.disabled = false; buttonEl.textContent = originalText; }
+    }
+}
+
+async function selectDeckToken(uri, buttonEl) {
+    const originalText = buttonEl ? buttonEl.textContent : '';
+    if (buttonEl) { buttonEl.disabled = true; buttonEl.textContent = '…'; }
+    try {
+        const resp = await fetch(uri);
+        if (!resp.ok) throw new Error('not found');
+        const card = await resp.json();
+        window.selectedTokenData = card;
+        const createBtn = document.getElementById('createTokenBtn');
+        if (createBtn) { createBtn.disabled = false; createBtn.style.opacity = '1'; }
+        document.getElementById('tokenSearch').value = card.name;
+        document.getElementById('tokenSearchResults').style.display = 'none';
+        document.getElementById('tokenSearchResults').innerHTML = '';
+    } catch (e) {
+        fourPlayerSystem.log(`⚠️ Couldn't load that token`, 'warning');
+    } finally {
+        if (buttonEl) { buttonEl.disabled = false; buttonEl.textContent = originalText; }
+    }
+}
+
+function makeTokenChoiceButton(label, onClick) {
+    const btn = document.createElement('button');
+    btn.className = 'btn';
+    btn.textContent = label;
+    btn.style.cssText = 'padding:5px 10px;font-size:0.78em;background:rgba(255,255,255,0.12);border:1px solid rgba(255,255,255,0.25);';
+    btn.addEventListener('click', () => onClick(btn));
+    return btn;
+}
+
+function populateTokenCreatorChoices() {
+    // Common tokens - always available
+    const commonContainer = document.getElementById('commonTokenChoices');
+    commonContainer.innerHTML = '';
+    COMMON_MTG_TOKENS.forEach(name => {
+        commonContainer.appendChild(makeTokenChoiceButton(name, (btn) => quickSelectToken(name, btn)));
+    });
+
+    // Deck tokens - only shown if the player's imported deck actually
+    // produces any (derived from Scryfall's all_parts on each deck card)
+    const deckSection = document.getElementById('deckTokensSection');
+    const deckContainer = document.getElementById('deckTokenChoices');
+    deckContainer.innerHTML = '';
+
+    const seen = new Map();
+    (typeof deckData !== 'undefined' ? deckData : []).forEach(card => {
+        (card.all_parts || []).forEach(part => {
+            if (!seen.has(part.id)) seen.set(part.id, part);
+        });
+    });
+
+    if (seen.size > 0) {
+        seen.forEach(part => {
+            deckContainer.appendChild(makeTokenChoiceButton(part.name, (btn) => selectDeckToken(part.uri, btn)));
+        });
+        deckSection.style.display = 'block';
+    } else {
+        deckSection.style.display = 'none';
+    }
+}
+
 function openTokenCreator() {
     document.getElementById('tokenCreatorModal').style.display = 'block';
+    populateTokenCreatorChoices();
 }
 
 function closeTokenCreator() {
@@ -7360,6 +8316,9 @@ function duplicateCard(card) {
     const clone = card.cloneNode(true);
     // Assign a new unique id
     clone.setAttribute('data-id', `dup_${Date.now()}_${Math.random().toString(36).slice(2)}`);
+    // Mark as a copy so removing it later can skip the "are you sure?"
+    // confirmation the way real deck cards still get.
+    clone.dataset.isCopy = 'true';
     // Preserve added-card highlight if original had it
     // Place into the same container the original is in
     const inHand = fourPlayerSystem.handContainer.contains(card);
@@ -7386,9 +8345,76 @@ function duplicateCard(card) {
 }
 
 // ============================================================
-// REMOVE CARD (X + click) – confirmation modal
+// REMOVE CARD (X + click) – confirmation modal for real cards,
+// instant removal for tokens/copies, both feed the Undo stack.
 // ============================================================
 window._cardPendingRemove = null;
+window.cardRemovalUndoStack = [];
+const MAX_UNDO_STACK = 20;
+
+function captureCardSnapshot(card) {
+    const img = card.querySelector('img');
+    return {
+        container: fourPlayerSystem.handContainer.contains(card) ? 'hand' : 'main',
+        cardData: {
+            id: card.getAttribute('data-id') || undefined,
+            name: card.dataset.name || '',
+            src: img ? img.src : '',
+            mana: card.dataset.mana || '',
+            pt: card.dataset.pt || '',
+            loyalty: card.dataset.loyalty || ''
+        },
+        x: card.style.left ? parseFloat(card.style.left) : null,
+        y: card.style.top ? parseFloat(card.style.top) : null,
+        tapped: card.classList.contains('tapped'),
+        isToken: card.dataset.isToken === 'true',
+        isCopy: card.dataset.isCopy === 'true'
+    };
+}
+
+function pushUndoSnapshot(card) {
+    window.cardRemovalUndoStack.push(captureCardSnapshot(card));
+    if (window.cardRemovalUndoStack.length > MAX_UNDO_STACK) {
+        window.cardRemovalUndoStack.shift();
+    }
+    updateUndoButtonState();
+}
+
+function updateUndoButtonState() {
+    const btn = document.getElementById('undoRemoveBtn');
+    if (!btn) return;
+    const has = window.cardRemovalUndoStack.length > 0;
+    btn.disabled = !has;
+    btn.style.opacity = has ? '1' : '0.5';
+}
+
+function undoLastRemoval() {
+    const snapshot = window.cardRemovalUndoStack.pop();
+    updateUndoButtonState();
+    if (!snapshot) return;
+
+    const { container, cardData, x, y, tapped, isToken, isCopy } = snapshot;
+    const newCard = createAndMoveCard(cardData, container, x, y, tapped);
+    if (newCard) {
+        if (isToken) newCard.dataset.isToken = 'true';
+        if (isCopy) newCard.dataset.isCopy = 'true';
+    }
+
+    fourPlayerSystem.log(`↩️ Restored ${cardData.name || 'card'}`);
+    fourPlayerSystem.broadcastContainerState();
+}
+
+// Tokens and copies are throwaway by design (you can always remake a
+// token, and a copy is - by definition - a duplicate of something else
+// still on the field), so removing one just needs the Undo safety net,
+// not a blocking "are you sure?" dialog every time.
+function removeCardNoConfirm(card) {
+    if (!card || !card.parentElement) return;
+    pushUndoSnapshot(card);
+    fourPlayerSystem.log(`🗑️ Removed ${card.dataset.name || 'card'}`);
+    card.remove();
+    fourPlayerSystem.broadcastContainerState();
+}
 
 function openConfirmRemove(card) {
     window._cardPendingRemove = card;
@@ -7407,6 +8433,7 @@ function closeConfirmRemove() {
 function confirmRemoveCard() {
     const card = window._cardPendingRemove;
     if (card && card.parentElement) {
+        pushUndoSnapshot(card);
         fourPlayerSystem.log(`🗑️ Removed ${card.dataset.name || 'card'} from the game`);
         card.remove();
         fourPlayerSystem.broadcastContainerState();
@@ -7759,25 +8786,40 @@ function createToken() {
     token.dataset.isToken = 'true';
     token.setAttribute('data-rotation', '0');
 
-    // Use actual MTG token image
+    // Use actual MTG token image. Split/double-faced tokens (e.g. "Illusion
+    // // Saproling") don't have a top-level image_uris - Scryfall nests it
+    // per-face under card_faces instead, so fall back to the first face.
     const img = document.createElement('img');
-    img.src = selectedTokenData.image_uris?.normal || selectedTokenData.image_uris?.large || selectedTokenData.image_uris?.small || '';
+    img.src = selectedTokenData.image_uris?.normal
+        || selectedTokenData.image_uris?.large
+        || selectedTokenData.image_uris?.small
+        || selectedTokenData.card_faces?.[0]?.image_uris?.normal
+        || selectedTokenData.card_faces?.[0]?.image_uris?.large
+        || selectedTokenData.card_faces?.[0]?.image_uris?.small
+        || '';
     img.alt = name;
     img.style.width = '100%';
     img.style.height = '100%';
     img.style.objectFit = 'cover';
     token.appendChild(img);
 
-    token.style.position = '';
-    token.style.left = '';
-    token.style.top = '';
-    token.style.margin = '0 5px';
+    // BUGFIX: tokens were placed in your hand, but a freshly-created token
+    // represents something already in play (a Soldier, a Treasure, etc.) -
+    // it belongs on the field like a card made via createAndMoveCard(...,
+    // 'main'), not in your hand where it'd look like an uncast card.
+    const randomX = Math.random() * (fourPlayerSystem.mainContainer.offsetWidth - 100);
+    const randomY = Math.random() * (fourPlayerSystem.mainContainer.offsetHeight - 140);
+    token.style.position = 'absolute';
+    token.style.left = `${randomX}px`;
+    token.style.top = `${randomY}px`;
+    token.dataset.x = randomX;
+    token.dataset.y = randomY;
 
-    fourPlayerSystem.handContainer.appendChild(token);
-    fourPlayerSystem.rearrangeCardsInHand();
+    fourPlayerSystem.mainContainer.appendChild(token);
     addCardOverlays(token);
+    fourPlayerSystem.broadcastContainerState();
 
-    fourPlayerSystem.log(`🎴 Created ${name} token${pt ? ' (' + pt + ')' : ''}`);
+    fourPlayerSystem.log(`🎴 Created ${name} token${pt ? ' (' + pt + ')' : ''} on the field`);
 
     // Reset state
     window.selectedTokenData = null;
@@ -7820,7 +8862,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             const resultDiv = document.createElement('div');
                             resultDiv.style.cssText = 'padding:8px;cursor:pointer;border-radius:6px;margin-bottom:4px;background:rgba(255,255,255,0.1);display:flex;align-items:center;gap:10px;';
                             resultDiv.innerHTML = `
-                                <img src="${card.image_uris?.small || ''}" style="width:40px;height:auto;border-radius:4px;">
+                                <img src="${card.image_uris?.small || card.card_faces?.[0]?.image_uris?.small || ''}" style="width:40px;height:auto;border-radius:4px;">
                                 <div style="flex:1;">
                                     <div style="color:#fff;font-size:0.9em;font-weight:bold;">${card.name}</div>
                                     <div style="color:#aaa;font-size:0.8em;">${card.type_line}</div>
@@ -8221,7 +9263,7 @@ function renderCmdModal(vid) {
         const dmg = (window.gameState.cmdDmg[vid]&&window.gameState.cmdDmg[vid][i])||0;
         const player = document.createElement('div');
         player.className='cmd-modal-player';
-        player.innerHTML=`<div class="cmd-player-name">${window.playerNames[i]||'Player '+i}</div><div class="cmd-value ${dmg>=21?'lethal':''}" id="cmdVal_${vid}_${i}">${dmg}</div><div class="cmd-btns"><button onclick="changeCmdDmg(${vid},${i},-1)">−</button><button onclick="changeCmdDmg(${vid},${i},+1)">+</button></div>`;
+        player.innerHTML=`<div class="cmd-player-name">${escapeHtml(window.playerNames[i]||'Player '+i)}</div><div class="cmd-value ${dmg>=21?'lethal':''}" id="cmdVal_${vid}_${i}">${dmg}</div><div class="cmd-btns"><button onclick="changeCmdDmg(${vid},${i},-1)">−</button><button onclick="changeCmdDmg(${vid},${i},+1)">+</button></div>`;
         grid.appendChild(player);
     }
 }
@@ -8339,34 +9381,50 @@ function untapAllCards() {
 }
 
 function tapHighlighted() {
+    // BUGFIX: this used to only ever tap - clicking it again on already-tapped
+    // cards did nothing. It now toggles: untaps any highlighted card that is
+    // currently tapped, and taps any highlighted card that isn't - so pressing
+    // it a second time on the same selection correctly untaps everything.
     const cards = Array.from(fourPlayerSystem.selectedCards);
+    let tappedCount = 0;
+    let untappedCount = 0;
     cards.forEach(card => {
-        if (!card.classList.contains('tapped')) {
+        const willTap = !card.classList.contains('tapped');
+        if (willTap) {
             card.classList.add('tapped');
             card.style.transform = 'rotate(90deg)';
             card.setAttribute('data-rotation', '90');
-            
-            // Send card_rotated message for each card to sync with other players
-            try {
-                const cardId = card.getAttribute('data-id') || `unknown_${Date.now()}`;
-                fourPlayerSystem.sendMessage({
-                    type: 'card_rotated',
-                    data: {
-                        id: cardId,
-                        rotation: 90,
-                        timestamp: Date.now(),
-                        x: parseFloat(card.dataset.x || '0'),
-                        y: parseFloat(card.dataset.y || '0'),
-                        container: card.parentElement?.id || 'main-container'
-                    }
-                });
-            } catch (error) {
-                console.log('Card tap sync failed', error);
-            }
+            tappedCount++;
+        } else {
+            card.classList.remove('tapped');
+            card.style.transform = '';
+            card.setAttribute('data-rotation', '0');
+            untappedCount++;
+        }
+
+        // Send card_rotated message for each card to sync with other players
+        try {
+            const cardId = card.getAttribute('data-id') || `unknown_${Date.now()}`;
+            fourPlayerSystem.sendMessage({
+                type: 'card_rotated',
+                data: {
+                    id: cardId,
+                    rotation: willTap ? 90 : 0,
+                    timestamp: Date.now(),
+                    x: parseFloat(card.dataset.x || '0'),
+                    y: parseFloat(card.dataset.y || '0'),
+                    container: card.parentElement?.id || 'main-container'
+                }
+            });
+        } catch (error) {
+            console.log('Card tap/untap sync failed', error);
         }
     });
     if (cards.length > 0) {
-        fourPlayerSystem.log(`🔄 Tapped ${cards.length} highlighted cards`);
+        const parts = [];
+        if (tappedCount) parts.push(`tapped ${tappedCount}`);
+        if (untappedCount) parts.push(`untapped ${untappedCount}`);
+        fourPlayerSystem.log(`🔄 ${parts.join(', ')} highlighted card${cards.length > 1 ? 's' : ''}`);
         fourPlayerSystem.clearSelection();
         fourPlayerSystem.broadcastContainerState();
     }
@@ -8462,20 +9520,23 @@ function createCounterToken(counterName) {
     wrapper.appendChild(counter);
     
     // +/- buttons overlaid on sides
+    // Sized down from 35px - they were dominating the 60px counter circle
+    // they're attached to and felt oversized next to everything else on the
+    // board.
     const minusBtn = document.createElement('button');
     minusBtn.textContent = '−';
     minusBtn.style.position = 'absolute';
-    minusBtn.style.left = '-18px';
+    minusBtn.style.left = '-12px';
     minusBtn.style.top = '50%';
     minusBtn.style.transform = 'translateY(-50%)';
-    minusBtn.style.width = '35px';
-    minusBtn.style.height = '35px';
-    minusBtn.style.borderRadius = '6px';
+    minusBtn.style.width = '22px';
+    minusBtn.style.height = '22px';
+    minusBtn.style.borderRadius = '5px';
     minusBtn.style.border = '2px solid white';
     minusBtn.style.background = 'rgba(244, 67, 54, 0.95)';
     minusBtn.style.color = 'white';
     minusBtn.style.cursor = 'pointer';
-    minusBtn.style.fontSize = '1.4em';
+    minusBtn.style.fontSize = '0.95em';
     minusBtn.style.fontWeight = 'bold';
     minusBtn.style.display = 'flex';
     minusBtn.style.alignItems = 'center';
@@ -8489,17 +9550,17 @@ function createCounterToken(counterName) {
     const plusBtn = document.createElement('button');
     plusBtn.textContent = '+';
     plusBtn.style.position = 'absolute';
-    plusBtn.style.right = '-18px';
+    plusBtn.style.right = '-12px';
     plusBtn.style.top = '50%';
     plusBtn.style.transform = 'translateY(-50%)';
-    plusBtn.style.width = '35px';
-    plusBtn.style.height = '35px';
-    plusBtn.style.borderRadius = '6px';
+    plusBtn.style.width = '22px';
+    plusBtn.style.height = '22px';
+    plusBtn.style.borderRadius = '5px';
     plusBtn.style.border = '2px solid white';
     plusBtn.style.background = 'rgba(76, 175, 80, 0.95)';
     plusBtn.style.color = 'white';
     plusBtn.style.cursor = 'pointer';
-    plusBtn.style.fontSize = '1.4em';
+    plusBtn.style.fontSize = '0.95em';
     plusBtn.style.fontWeight = 'bold';
     plusBtn.style.display = 'flex';
     plusBtn.style.alignItems = 'center';
@@ -9435,7 +10496,7 @@ function serializeZone(zone) {
 function deserializeContainer(cardsData, container, type) {
     if (!cardsData) return;
     cardsData.forEach(cardData => {
-        createAndMoveCard(cardData, type, cardData.x, cardData.y, cardData.tapped);
+        createAndMoveCard(cardData, type, cardData.x, cardData.y, !!cardData.tapped);
     });
 }
 
@@ -9474,27 +10535,240 @@ function deserializeZone(cardsData, zone) {
 // ============================================================
 // COIN FLIP FUNCTION
 // ============================================================
+// BUGFIX: the toolbar "Flip Coin" button used to call flipCoin() directly,
+// which both opened the modal AND immediately performed a flip - so the
+// coin appeared to have already landed the instant you opened it, with no
+// chance to set the quantity first or actually watch it flip. Opening the
+// modal now just shows an idle, unflipped coin; flipCoin() (wired to the
+// modal's own "Flip" button) is what actually triggers a flip.
+function openCoinFlipModal() {
+    document.getElementById('coinFlipModal').style.display = 'block';
+
+    const stage = document.getElementById('coinFlipStage');
+    const resultEl = document.getElementById('coinFlipResult');
+    stage.innerHTML = '';
+    resultEl.textContent = '';
+
+    // Show a static, unflipped coin sitting heads-up so the modal doesn't
+    // look empty while waiting for the player to press Flip.
+    const scene = document.createElement('div');
+    scene.className = 'coin-3d-scene';
+    const coinEl = document.createElement('div');
+    coinEl.className = 'coin-3d';
+    coinEl.style.animation = 'none';
+    coinEl.innerHTML = `<div class="coin-face coin-heads">👑</div><div class="coin-face coin-tails">🦅</div>`;
+    scene.appendChild(coinEl);
+    stage.appendChild(scene);
+}
+
 function flipCoin() {
-    const result = Math.random() < 0.5 ? 'Heads' : 'Tails';
-    const emoji = result === 'Heads' ? '👑' : '🦅';
-    
-    fourPlayerSystem.log(`🪙 Coin flip: ${emoji} ${result}!`);
+    document.getElementById('coinFlipModal').style.display = 'block';
+
+    const quantity = Math.max(1, Math.min(10, parseInt(document.getElementById('coinQuantity').value) || 1));
+    const stage = document.getElementById('coinFlipStage');
+    const resultEl = document.getElementById('coinFlipResult');
+    stage.innerHTML = '';
+    resultEl.textContent = '';
+
+    const results = [];
+    for (let i = 0; i < quantity; i++) {
+        const result = Math.random() < 0.5 ? 'Heads' : 'Tails';
+        results.push(result);
+
+        const scene = document.createElement('div');
+        scene.className = 'coin-3d-scene';
+        const coinEl = document.createElement('div');
+        coinEl.className = 'coin-3d';
+        coinEl.innerHTML = `<div class="coin-face coin-heads">👑</div><div class="coin-face coin-tails">🦅</div>`;
+
+        const baseDeg = result === 'Heads' ? 0 : 180;
+        const extraSpins = (2 + Math.floor(Math.random() * 3)) * 360; // a few full flourish spins
+        coinEl.style.setProperty('--coin-end', `rotateY(${baseDeg + extraSpins}deg)`);
+
+        scene.appendChild(coinEl);
+        stage.appendChild(scene);
+    }
+
+    const heads = results.filter(r => r === 'Heads').length;
+    const tails = results.length - heads;
+    const summaryText = quantity === 1
+        ? `${results[0] === 'Heads' ? '👑' : '🦅'} ${results[0]}!`
+        : `👑 ${heads} Heads, 🦅 ${tails} Tails`;
+
+    setTimeout(() => {
+        resultEl.textContent = summaryText;
+    }, 1000);
+
+    const logMessage = quantity === 1
+        ? `🪙 Coin flip: ${results[0] === 'Heads' ? '👑' : '🦅'} ${results[0]}!`
+        : `🪙 Flipped ${quantity} coins: [${results.join(', ')}] → ${heads} Heads, ${tails} Tails`;
+
+    fourPlayerSystem.log(logMessage);
     
     if (fourPlayerSystem.isConnected) {
         fourPlayerSystem.sendMessage({
             type: 'announcement',
-            data: { message: `${fourPlayerSystem.playerName} flipped a coin: ${emoji} ${result}!` }
+            data: { message: `${fourPlayerSystem.playerName} ${logMessage}` }
+        });
+        // BUGFIX: other players previously only ever got the text log line
+        // above - they never actually saw the coin(s) flip. Broadcast the
+        // structured results too so every other screen can play the same
+        // animation in real time.
+        fourPlayerSystem.sendMessage({
+            type: 'coin_flip_broadcast',
+            data: { playerName: fourPlayerSystem.playerName, results }
         });
     }
 }
 
+function closeCoinFlipModal() {
+    document.getElementById('coinFlipModal').style.display = 'none';
+}
+
+// ============================================================
+// SHARED ROLL TOASTS
+// Renders another player's dice/coin roll on your screen the moment it
+// happens, using the exact same 3D animation code as your own rolls.
+// Deliberately NOT a .modal (which blocks the whole screen and captures
+// clicks) - and anchored directly over the roller's OWN projection tile
+// (not a generic top-center popup), so it's immediately obvious whose
+// roll it is even if two players roll at the same time.
+// ============================================================
+window._activeRollToastsBySection = {};
+
+function getProjectionSectionForPlayer(playerId) {
+    const slot = fourPlayerSystem.playerSlots && fourPlayerSystem.playerSlots[playerId];
+    if (!slot || !slot.container) return null;
+    return slot.container.closest('.projection-section') || slot.container.parentElement;
+}
+
+function stackRollToast(playerId, toast) {
+    const bucket = window._activeRollToastsBySection[playerId] || (window._activeRollToastsBySection[playerId] = []);
+    bucket.push(toast);
+}
+
+function unstackRollToast(playerId, toast) {
+    const bucket = window._activeRollToastsBySection[playerId];
+    if (!bucket) return;
+    const idx = bucket.indexOf(toast);
+    if (idx !== -1) bucket.splice(idx, 1);
+}
+
+function dismissRollToastAfter(playerId, toast, ms) {
+    setTimeout(() => {
+        toast.classList.add('fading');
+        unstackRollToast(playerId, toast);
+        setTimeout(() => toast.remove(), 450);
+    }, ms);
+}
+
+function createAnchoredToast(playerId, titleHtml) {
+    const section = getProjectionSectionForPlayer(playerId);
+    if (!section) return null;
+
+    // If this same player's tile already has a roll toast showing (e.g.
+    // they rolled dice twice in a row, or rolled then flipped), replace it
+    // rather than stacking two overlays on top of each other in the same
+    // small tile.
+    const existingBucket = window._activeRollToastsBySection[playerId];
+    if (existingBucket && existingBucket.length) {
+        existingBucket.forEach(t => t.remove());
+        window._activeRollToastsBySection[playerId] = [];
+    }
+
+    const toast = document.createElement('div');
+    toast.className = 'shared-roll-toast anchored';
+    toast.innerHTML = `<div class="roll-toast-title">${titleHtml}</div>`;
+
+    const stage = document.createElement('div');
+    stage.className = 'dice-roll-stage';
+    toast.appendChild(stage);
+
+    const summary = document.createElement('div');
+    summary.className = 'roll-toast-summary';
+    toast.appendChild(summary);
+
+    section.appendChild(toast);
+    stackRollToast(playerId, toast);
+
+    return { toast, stage, summary };
+}
+
+function showSharedDiceToast(playerId, playerName, resultsByGroup, grandTotal) {
+    if (!resultsByGroup || !resultsByGroup.length) return;
+
+    const built = createAnchoredToast(playerId, `🎲 ${escapeHtml(playerName || 'Player ' + playerId)} rolled...`);
+    if (!built) return;
+    const { toast, stage, summary } = built;
+
+    resultsByGroup.forEach(group => {
+        (group.rolls || []).forEach(roll => {
+            const dieEl = (group.diceType === 'd6')
+                ? createAnimatedD6(roll)
+                : createAnimatedDieToken(group.diceType, roll);
+            stage.appendChild(dieEl);
+        });
+    });
+
+    setTimeout(() => {
+        summary.textContent = `Total: ${grandTotal}`;
+    }, 950);
+
+    dismissRollToastAfter(playerId, toast, 4500);
+}
+
+function showSharedCoinToast(playerId, playerName, results) {
+    if (!results || !results.length) return;
+
+    const built = createAnchoredToast(playerId, `🪙 ${escapeHtml(playerName || 'Player ' + playerId)} flipped...`);
+    if (!built) return;
+    const { toast, stage, summary } = built;
+
+    results.forEach(result => {
+        const scene = document.createElement('div');
+        scene.className = 'coin-3d-scene';
+        const coinEl = document.createElement('div');
+        coinEl.className = 'coin-3d';
+        coinEl.innerHTML = `<div class="coin-face coin-heads">👑</div><div class="coin-face coin-tails">🦅</div>`;
+        const baseDeg = result === 'Heads' ? 0 : 180;
+        const extraSpins = (2 + Math.floor(Math.random() * 3)) * 360;
+        coinEl.style.setProperty('--coin-end', `rotateY(${baseDeg + extraSpins}deg)`);
+        scene.appendChild(coinEl);
+        stage.appendChild(scene);
+    });
+
+    const heads = results.filter(r => r === 'Heads').length;
+    const tails = results.length - heads;
+    const summaryText = results.length === 1
+        ? `${results[0] === 'Heads' ? '👑' : '🦅'} ${results[0]}!`
+        : `👑 ${heads} Heads, 🦅 ${tails} Tails`;
+
+    setTimeout(() => {
+        summary.textContent = summaryText;
+    }, 1000);
+
+    dismissRollToastAfter(playerId, toast, 4500);
+}
+
 // ============================================================
 // DICE ROLL FUNCTIONS
+// Supports multiple different dice types rolled together in one go
+// (e.g. 1d20 + 6d6). Each die tumbles with a real CSS 3D rotation before
+// settling; a d6 lands on an actual cube face showing the right pips,
+// every other die type settles on a spinning "token" showing its number
+// (there's no lightweight way to build true tetrahedron/octahedron/
+// dodecahedron/icosahedron meshes in pure CSS - see the CSS comments
+// above .dice-roll-stage).
 // ============================================================
+window.diceGroups = [];
+
 function openDiceModal() {
     const modal = document.getElementById('diceModal');
     if (modal) {
         modal.style.display = 'block';
+        document.getElementById('diceRollStage').innerHTML = '';
+        document.getElementById('diceRollSummary').textContent = '';
+        renderDiceGroupChips();
     }
 }
 
@@ -9505,37 +10779,183 @@ function closeDiceModal() {
     }
 }
 
-function rollDice() {
+function addDiceGroup() {
     const diceType = document.getElementById('diceType').value;
-    const diceQuantity = document.getElementById('diceQuantity').value;
-    
-    const sides = parseInt(diceType.substring(1)); // Remove 'd' prefix
-    const quantity = parseInt(diceQuantity);
-    
-    const rolls = [];
-    let total = 0;
-    
-    for (let i = 0; i < quantity; i++) {
-        const roll = Math.floor(Math.random() * sides) + 1;
-        rolls.push(roll);
-        total += roll;
+    const quantity = Math.max(1, Math.min(20, parseInt(document.getElementById('diceQuantity').value) || 1));
+
+    const existing = window.diceGroups.find(g => g.diceType === diceType);
+    if (existing) {
+        existing.quantity = Math.min(20, existing.quantity + quantity);
+    } else {
+        window.diceGroups.push({ diceType, quantity });
     }
-    
-    const rollsText = rolls.join(', ');
-    const message = quantity === 1 
-        ? `🎲 Rolled ${diceType}: ${rollsText}`
-        : `🎲 Rolled ${quantity}${diceType}: [${rollsText}] = ${total}`;
-    
+    renderDiceGroupChips();
+}
+
+function removeDiceGroup(diceType) {
+    window.diceGroups = window.diceGroups.filter(g => g.diceType !== diceType);
+    renderDiceGroupChips();
+}
+
+function renderDiceGroupChips() {
+    const list = document.getElementById('diceGroupList');
+    list.innerHTML = '';
+    window.diceGroups.forEach(g => {
+        const chip = document.createElement('div');
+        chip.className = 'dice-group-chip';
+        chip.innerHTML = `<span>${g.quantity}${g.diceType}</span>`;
+        const removeBtn = document.createElement('button');
+        removeBtn.textContent = '×';
+        removeBtn.addEventListener('click', () => removeDiceGroup(g.diceType));
+        chip.appendChild(removeBtn);
+        list.appendChild(chip);
+    });
+}
+
+// Bring the given cube face to the front, plus a few flourish full-turns
+function cubeEndRotationForValue(value) {
+    const spinsX = (1 + Math.floor(Math.random() * 3)) * 360;
+    const spinsY = (1 + Math.floor(Math.random() * 3)) * 360;
+    const map = {
+        1: { x: 0, y: 0 },
+        6: { x: 0, y: 180 },
+        2: { x: 0, y: -90 },
+        5: { x: 0, y: 90 },
+        3: { x: -90, y: 0 },
+        4: { x: 90, y: 0 }
+    };
+    const base = map[value] || map[1];
+    // Adding whole 360deg multiples doesn't change the resting face, it
+    // just makes the die visibly tumble through extra full rotations
+    // before landing on the correct one.
+    return `rotateX(${base.x + spinsX}deg) rotateY(${base.y + spinsY}deg)`;
+}
+
+const PIP_LAYOUTS = {
+    1: [4],
+    2: [0, 8],
+    3: [0, 4, 8],
+    4: [0, 2, 6, 8],
+    5: [0, 2, 4, 6, 8],
+    6: [0, 2, 3, 5, 6, 8]
+};
+
+function buildDieCubeFace(className, faceValue) {
+    const face = document.createElement('div');
+    face.className = `die-cube-face ${className}`;
+    const layout = PIP_LAYOUTS[faceValue] || [];
+    for (let i = 0; i < 9; i++) {
+        const cell = document.createElement('div');
+        if (layout.includes(i)) cell.className = 'pip';
+        face.appendChild(cell);
+    }
+    return face;
+}
+
+function createAnimatedD6(result) {
+    const scene = document.createElement('div');
+    scene.className = 'die-3d-scene';
+    const cube = document.createElement('div');
+    cube.className = 'die-cube';
+
+    // Standard opposite-faces-sum-to-7 die layout
+    const faces = [
+        ['die-face-front', 1], ['die-face-back', 6],
+        ['die-face-right', 2], ['die-face-left', 5],
+        ['die-face-top', 3], ['die-face-bottom', 4]
+    ];
+    faces.forEach(([cls, val]) => cube.appendChild(buildDieCubeFace(cls, val)));
+
+    cube.style.setProperty('--tumble-end', cubeEndRotationForValue(result));
+    scene.appendChild(cube);
+    return scene;
+}
+
+function createAnimatedDieToken(diceType, result) {
+    const scene = document.createElement('div');
+    scene.className = 'die-token-scene';
+    const token = document.createElement('div');
+    token.className = 'die-token';
+    token.style.setProperty('--tx', `${(2 + Math.floor(Math.random() * 3)) * 360}deg`);
+    token.style.setProperty('--ty', `${(2 + Math.floor(Math.random() * 3)) * 360}deg`);
+
+    const numEl = document.createElement('span');
+    numEl.textContent = '?';
+    const sidesEl = document.createElement('span');
+    sidesEl.className = 'die-token-sides';
+    sidesEl.textContent = diceType;
+    token.appendChild(numEl);
+    token.appendChild(sidesEl);
+    scene.appendChild(token);
+
+    // Slot-machine style digit cycling while it "tumbles," landing on the
+    // real result exactly when the 3D spin animation finishes.
+    const sides = parseInt(diceType.substring(1));
+    const cycle = setInterval(() => {
+        numEl.textContent = String(1 + Math.floor(Math.random() * sides));
+    }, 60);
+    setTimeout(() => {
+        clearInterval(cycle);
+        numEl.textContent = String(result);
+    }, 900);
+
+    return scene;
+}
+
+function rollDice() {
+    if (window.diceGroups.length === 0) {
+        // Convenience: if nothing was explicitly added, roll whatever is
+        // currently selected in the dropdown/qty fields.
+        addDiceGroup();
+    }
+
+    const stage = document.getElementById('diceRollStage');
+    const summary = document.getElementById('diceRollSummary');
+    stage.innerHTML = '';
+    summary.textContent = '';
+
+    const resultsByGroup = [];
+    let grandTotal = 0;
+
+    window.diceGroups.forEach(group => {
+        const sides = parseInt(group.diceType.substring(1));
+        const rolls = [];
+        for (let i = 0; i < group.quantity; i++) {
+            const roll = Math.floor(Math.random() * sides) + 1;
+            rolls.push(roll);
+            grandTotal += roll;
+
+            const dieEl = (group.diceType === 'd6')
+                ? createAnimatedD6(roll)
+                : createAnimatedDieToken(group.diceType, roll);
+            stage.appendChild(dieEl);
+        }
+        resultsByGroup.push({ diceType: group.diceType, rolls, subtotal: rolls.reduce((a, b) => a + b, 0) });
+    });
+
+    const summaryParts = resultsByGroup.map(g => `${g.rolls.length}${g.diceType}: [${g.rolls.join(', ')}]`);
+    const message = `🎲 ${summaryParts.join('  +  ')}  =  ${grandTotal}`;
+
+    setTimeout(() => {
+        summary.textContent = `Total: ${grandTotal}`;
+    }, 950);
+
     fourPlayerSystem.log(message);
-    
+
     if (fourPlayerSystem.isConnected) {
         fourPlayerSystem.sendMessage({
             type: 'announcement',
-            data: { message: `${fourPlayerSystem.playerName} ${message}` }
+            data: { message: `${fourPlayerSystem.playerName} rolled ${message}` }
+        });
+        // BUGFIX: same issue as coin flips - other players only ever saw
+        // the text log line, never the actual dice tumbling. Broadcast the
+        // structured per-group results so every other screen can replay
+        // the same animation live.
+        fourPlayerSystem.sendMessage({
+            type: 'dice_roll_broadcast',
+            data: { playerName: fourPlayerSystem.playerName, resultsByGroup, grandTotal }
         });
     }
-    
-    closeDiceModal();
 }
 
 // Close modals when clicking outside
@@ -9674,38 +11094,64 @@ document.addEventListener('DOMContentLoaded', () => {
     
     <!-- DICE ROLL MODAL -->
     <div id="diceModal" class="modal">
-        <div class="modal-content" style="max-width:400px;">
+        <div class="modal-content" style="max-width:480px;">
             <span class="close" onclick="closeDiceModal()">&times;</span>
             <h2 style="color:#4ecdc4;">🎲 Roll Dice</h2>
-            
-            <div style="margin: 20px 0;">
-                <label style="color:#fff; display:block; margin-bottom:8px; font-weight:bold;">Dice Type:</label>
-                <select id="diceType" style="width:100%; padding:10px; border-radius:8px; border:2px solid rgba(255,255,255,0.2); background:rgba(0,0,0,0.3); color:#fff; font-size:1em;">
-                    <option value="d4">d4 (4-sided)</option>
-                    <option value="d6">d6 (6-sided)</option>
-                    <option value="d8">d8 (8-sided)</option>
-                    <option value="d10">d10 (10-sided)</option>
-                    <option value="d12">d12 (12-sided)</option>
-                    <option value="d20" selected>d20 (20-sided)</option>
-                    <option value="d100">d100 (100-sided)</option>
-                </select>
+            <p style="color:#aaa;font-size:0.82em;margin-bottom:10px;">Add as many dice types as you want, then roll them all together - e.g. a single d20 plus six d6.</p>
+
+            <div style="display:flex;gap:8px;align-items:flex-end;margin-bottom:10px;">
+                <div style="flex:1;">
+                    <label style="color:#fff; display:block; margin-bottom:6px; font-size:0.85em;">Dice Type:</label>
+                    <select id="diceType" style="width:100%; padding:8px; border-radius:8px; border:2px solid rgba(255,255,255,0.2); background:rgba(0,0,0,0.3); color:#fff;">
+                        <option value="d4">d4</option>
+                        <option value="d6">d6</option>
+                        <option value="d8">d8</option>
+                        <option value="d10">d10</option>
+                        <option value="d12">d12</option>
+                        <option value="d20" selected>d20</option>
+                        <option value="d100">d100</option>
+                    </select>
+                </div>
+                <div style="width:80px;">
+                    <label style="color:#fff; display:block; margin-bottom:6px; font-size:0.85em;">Qty:</label>
+                    <input type="number" id="diceQuantity" min="1" max="20" value="1" style="width:100%; padding:8px; border-radius:8px; border:2px solid rgba(255,255,255,0.2); background:rgba(0,0,0,0.3); color:#fff;">
+                </div>
+                <button onclick="addDiceGroup()" class="btn" style="padding:8px 14px;white-space:nowrap;">+ Add</button>
             </div>
-            
-            <div style="margin: 20px 0;">
-                <label style="color:#fff; display:block; margin-bottom:8px; font-weight:bold;">Number of Dice:</label>
-                <input type="number" id="diceQuantity" min="1" max="20" value="1" style="width:100%; padding:10px; border-radius:8px; border:2px solid rgba(255,255,255,0.2); background:rgba(0,0,0,0.3); color:#fff; font-size:1em;">
-            </div>
-            
+
+            <div id="diceGroupList" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px;min-height:20px;"></div>
+
+            <div id="diceRollStage" class="dice-roll-stage"></div>
+            <div id="diceRollSummary" style="text-align:center;color:#4ecdc4;font-weight:bold;min-height:24px;"></div>
+
             <div class="modal-buttons">
                 <button onclick="rollDice()" class="btn" style="background:linear-gradient(135deg,#2196F3,#1976D2); padding:12px 30px;">
-                    🎲 Roll
+                    🎲 Roll All
                 </button>
                 <button onclick="closeDiceModal()" class="btn secondary" style="padding:12px 30px;">
-                    Cancel
+                    Close
                 </button>
             </div>
         </div>
     </div>
+
+    <div id="coinFlipModal" class="modal">
+        <div class="modal-content" style="max-width:340px;text-align:center;">
+            <span class="close" onclick="closeCoinFlipModal()">&times;</span>
+            <h2 style="color:#FFC107;">🪙 Coin Flip</h2>
+            <div style="display:flex;align-items:center;justify-content:center;gap:10px;margin-bottom:10px;">
+                <label style="color:#fff;font-size:0.85em;">Number of coins:</label>
+                <input type="number" id="coinQuantity" min="1" max="10" value="1" style="width:60px;padding:6px;border-radius:8px;border:2px solid rgba(255,255,255,0.2);background:rgba(0,0,0,0.3);color:#fff;text-align:center;">
+            </div>
+            <div id="coinFlipStage" class="dice-roll-stage" style="min-height:80px;"></div>
+            <div id="coinFlipResult" style="color:#4ecdc4;font-weight:bold;font-size:1.1em;min-height:24px;"></div>
+            <div class="modal-buttons">
+                <button onclick="flipCoin()" class="btn" style="background:linear-gradient(135deg,#FF9800,#F57C00);">🪙 Flip</button>
+                <button onclick="closeCoinFlipModal()" class="btn secondary">Close</button>
+            </div>
+        </div>
+    </div>
+
     <!-- ADD CARD SEARCH MODAL -->
     <div id="addCardModal" class="modal">
         <div class="modal-content" style="max-width: 500px;">
