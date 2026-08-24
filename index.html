@@ -603,6 +603,29 @@
             font-style: italic;
         }
 
+        .scooped-out {
+            filter: grayscale(0.85);
+            opacity: 0.55;
+            position: relative;
+        }
+
+        .scooped-out::after {
+            content: '🏳️ SCOOPED — SPECTATING';
+            position: absolute;
+            top: 8px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(183, 28, 28, 0.9);
+            color: white;
+            padding: 4px 10px;
+            border-radius: 6px;
+            font-size: 0.75em;
+            font-weight: bold;
+            letter-spacing: 0.5px;
+            z-index: 20;
+            pointer-events: none;
+        }
+
         .bottom-section {
             margin-top: 20px;
             display: grid;
@@ -2024,6 +2047,7 @@
                     <button onclick="openAddCardModal()" style="background:rgba(76,175,80,0.2);border-color:#4CAF50;">➕ Add New Card</button>
                     <button onclick="openTokenCreator()" style="background:rgba(33,150,243,0.2);border-color:#2196F3;">🎴 Create Token</button>
                     <button onclick="openImportDeckModal()" style="background:rgba(244,67,54,0.2);border-color:#F44336;">📥 Import Deck</button>
+                    <button onclick="removeDeck()" style="background:rgba(183,28,28,0.35);border-color:#B71C1C;">🗑️ Remove Deck</button>
                 </div>
                 <div class="flex-container main-container" id="mainContainer"></div>
             </div>
@@ -2044,7 +2068,7 @@
                 <button class="btn secondary" onclick="loadGameState()">📂 Load Game</button>
                 <button class="btn secondary" onclick="sendTestMessage()">📤 Send Test Message</button>
                 <button class="btn secondary" onclick="clearLog()">🗑️ Clear Log</button>
-                <button class="btn secondary" onclick="resetGame()">🔄 Reset Game</button>
+                <button class="btn secondary" id="resetGameBtn" onclick="requestResetVote()">🔄 Reset Game</button>
             </div>
         </div>
     </div>
@@ -2439,6 +2463,7 @@ class FourPlayerWebSocketSystem {
         this.isSpectator = false;
         this.seatNumber = null;
         this.gameCode = null;
+        this.permanentLeaveSent = false; // guards against double-firing the leave beacon
         this.connectedPlayers = new Map();
         this.reconnectAttempts = 0;
         this.maxReconnectAttempts = 5;
@@ -4415,6 +4440,7 @@ class FourPlayerWebSocketSystem {
         }
 
         this.isConnecting = true;
+        this.permanentLeaveSent = false; // fresh connection - allow the leave beacon to fire again next time
         this.updateConnectionStatus();
         this.connectBtn.disabled = true;
 
@@ -4451,6 +4477,7 @@ class FourPlayerWebSocketSystem {
             } catch (e) {
                 console.log('Could not send leave_game message');
             }
+            this.permanentLeaveSent = true; // don't also fire the beforeunload beacon for this
             
             // Give the message a moment to send before closing
             setTimeout(() => {
@@ -4624,6 +4651,23 @@ class FourPlayerWebSocketSystem {
                 // Mark player as temporarily disconnected (they can reconnect within 5 minutes)
                 this.updatePlayerSlotStatus(dcPlayerId, 'disconnected');
                 this.log(`⚠️ Player ${dcPlayerId} (${dcPlayerName}) disconnected - can reconnect within 5 minutes`);
+                break;
+
+            case 'host_migrated':
+                this.handleHostMigrated(message.data);
+                break;
+
+            case 'reset_vote_update':
+                this.handleResetVoteUpdate(message.data);
+                break;
+
+            case 'reset_game_confirmed':
+                this.log('🔄 All players agreed — resetting the game for everyone.');
+                performLocalGameReset();
+                break;
+
+            case 'player_scooped':
+                this.handlePlayerScooped(message.data);
                 break;
 
             case 'announcement':
@@ -5266,6 +5310,48 @@ showPermissionModal(message, callback) {
         for (let i = 1; i <= 4; i++) {
             this.clearPlayerSlot(i);
         }
+    }
+
+    // The host (seat 1) permanently left; the lowest remaining seat has
+    // been promoted to take over seat 1 on the server. Relabel/move that
+    // player's projection panel accordingly. A follow-up full room_state
+    // message (sent by the server right after this) repopulates seat 1's
+    // actual board contents, so this only needs to handle the seat labels
+    // and clearing out the vacated slot.
+    handleHostMigrated(data) {
+        const { oldSeat, newSeat, playerName } = data;
+        this.log(`👑 ${playerName} is now the host (moved from Player ${oldSeat} to Player ${newSeat})`);
+
+        if (this.playerId === oldSeat && !this.isSpectator) {
+            // This is me - I've just become the new host.
+            this.playerId = newSeat;
+            this.seatNumber = newSeat;
+            try { sessionStorage.setItem('ws_seat_number', String(newSeat)); } catch (e) {}
+            this.updatePlayerInfo();
+            this.updateOwnSlot();
+            this.log(`🎉 You are now Player ${newSeat} (the host)`);
+        }
+
+        this.connectedPlayers.delete(oldSeat);
+        this.clearPlayerSlot(oldSeat);
+        // Seat `newSeat`'s panel is repopulated by the room_state broadcast
+        // the server sends immediately after host_migrated.
+    }
+
+    handleResetVoteUpdate(data) {
+        const { playerName, votes, required, withdrawn } = data;
+        if (withdrawn) {
+            this.log(`🗳️ ${playerName} withdrew their vote to reset the game (${votes.length}/${required} agreed)`);
+        } else {
+            this.log(`🗳️ ${playerName} voted to reset the game (${votes.length}/${required} agreed)`);
+        }
+        updateResetVoteButton(votes, required, this.playerId);
+    }
+
+    handlePlayerScooped(data) {
+        const { playerId, playerName } = data;
+        this.log(`🏳️ ${playerName} (Player ${playerId}) scooped — they're out for the rest of this game and are just watching until it's reset.`);
+        markPlayerScooped(playerId);
     }
 
 updateOwnSlot() {
@@ -6710,35 +6796,70 @@ document.addEventListener('click', (e) => {
     fourPlayerSystem.log(`📦 ${fourPlayerSystem.selectedCards.size} cards selected`);
 });
 
-// Track if this is a page refresh vs actual close
-let isPageRefresh = false;
+// ============================================================
+// WINDOW/TAB CLOSE = PERMANENT LEAVE
+// Closing the window (or refreshing - browsers can't reliably tell the two
+// apart) is treated the same as pressing the Disconnect button: the seat is
+// freed immediately, cards are not preserved, and rejoining later means a
+// fresh seat that needs the deck re-imported. Only a genuine dropped
+// connection (network hiccup, ping timeout, no unload event at all) keeps
+// the 5-minute reconnect grace period on the server.
+//
+// A plain WebSocket send is not guaranteed to flush during unload, so this
+// uses navigator.sendBeacon() to a small HTTP endpoint on the same server
+// as the reliable path, with a best-effort ws message alongside it.
+// ============================================================
+function sendPermanentLeaveBeacon() {
+    if (!fourPlayerSystem.isConnected || fourPlayerSystem.isSpectator) return;
+    if (fourPlayerSystem.permanentLeaveSent) return; // beforeunload + pagehide can both fire
+    fourPlayerSystem.permanentLeaveSent = true;
 
-window.addEventListener('beforeunload', (e) => {
-    if (fourPlayerSystem.isConnected) {
-        // Don't disconnect on page refresh - allow reconnection
-        // The server will keep the player's state for 5 minutes
-        // Only mark disconnection intent if user is actively leaving (not refreshing)
-        
-        // Note: We can't reliably detect the difference between refresh and close
-        // So we'll let the connection close naturally, and rely on the server's
-        // 5-minute grace period to allow reconnection
-        
-        // The UUID in sessionStorage will allow the player to reconnect to their seat
-    }
-});
+    try {
+        fourPlayerSystem.ws && fourPlayerSystem.ws.send(JSON.stringify({
+            type: 'leave_game',
+            data: {
+                playerId: fourPlayerSystem.playerId,
+                playerName: fourPlayerSystem.playerName,
+                permanent: true
+            }
+        }));
+    } catch (e) { /* best-effort only */ }
+
+    try {
+        const uuid = sessionStorage.getItem('ws_player_uuid');
+        if (uuid && fourPlayerSystem.roomId && fourPlayerSystem.serverUrl) {
+            const leaveUrl = fourPlayerSystem.serverUrl
+                .replace(/^wss:/i, 'https:')
+                .replace(/^ws:/i, 'http:')
+                .replace(/\/$/, '') + '/leave';
+            const payload = JSON.stringify({ roomId: fourPlayerSystem.roomId, uuid });
+            navigator.sendBeacon(leaveUrl, new Blob([payload], { type: 'text/plain' }));
+        }
+    } catch (e) { /* best-effort only */ }
+
+    // Wipe the local identity right away so reopening this room (even in
+    // the same browser) starts a brand-new join, not a silent reconnect.
+    try {
+        sessionStorage.removeItem('ws_seat_number');
+        sessionStorage.removeItem('ws_game_code');
+        sessionStorage.removeItem('ws_is_spectator');
+        sessionStorage.removeItem('ws_player_uuid');
+    } catch (e) { /* ignore */ }
+}
+
+window.addEventListener('beforeunload', sendPermanentLeaveBeacon);
+window.addEventListener('pagehide', sendPermanentLeaveBeacon);
+
 
 // ============================================================
 // AUTO-RECONNECT ON PAGE LOAD
-// Previously a refresh would just drop you at the lobby screen - the
-// server kept your seat and board state for 5 minutes (see the
-// disconnectedPlayers grace period), and clicking "Connect" again would
-// correctly restore everything via toggleConnection()'s existing
-// saved-seat check below, but that reconnect only ever fired on a manual
-// click. If you didn't notice the button now said "Reconnect (Seat N)"
-// and re-click it, it looked like refreshing just wiped your board.
-// This automatically does that same reconnect the instant the page
-// loads, so only an explicit Disconnect or an all-agreed Reset Game
-// (both of which clear these sessionStorage keys) can actually drop you.
+// Normally this will find nothing to do now: a real Disconnect click or a
+// window close/refresh (see sendPermanentLeaveBeacon above) clears these
+// sessionStorage keys immediately, so a fresh page load has nothing to
+// restore. This only kicks in for the genuine-hiccup case - a browser
+// crash/force-quit that never got to run the unload handler - where the
+// tab's sessionStorage survived and the server still has the seat held in
+// its 5-minute reconnect grace period.
 // ============================================================
 document.addEventListener('DOMContentLoaded', () => {
     try {
@@ -8705,6 +8826,101 @@ function openImportDeckModal() {
 }
 
 // ============================================================
+// REMOVE DECK — full self-board clear so a broken/partial import can be
+// re-done from scratch. Clears deck, hand, battlefield, graveyard, exile,
+// and command zone for THIS player only, and tells everyone else it
+// happened. If the game has already started (everyone readied up), this
+// counts as scooping/forfeiting: the player drops out of turn order and
+// just watches until the whole table agrees to Reset Game.
+// ============================================================
+function removeDeck() {
+    if (fourPlayerSystem.isSpectator) {
+        fourPlayerSystem.log('❌ Spectators don\'t have a deck to remove', 'error');
+        return;
+    }
+
+    const midGame = !!window.gameStarted;
+    const warning = midGame
+        ? '⚠️ The game has already started — removing your deck now counts as SCOOPING (forfeiting). You will drop out of the turn order and just watch until the table resets. Continue?'
+        : '⚠️ Remove your entire deck, hand, battlefield, graveyard, exile, and command zone? You\'ll need to re-import a deck list afterward. This cannot be undone.';
+
+    if (!confirm(warning)) return;
+
+    // Clear everything on this player's board
+    fourPlayerSystem.handContainer.innerHTML = '';
+    fourPlayerSystem.mainContainer.innerHTML = '';
+    ['deck1', 'graveyard1', 'exile1', 'command1'].forEach(zoneId => {
+        const zone = document.getElementById(zoneId);
+        if (zone) {
+            zone.querySelectorAll('.card').forEach(card => card.remove());
+        }
+    });
+    deckData = [];
+    deckCardElement = null;
+    updateMyDeckCount();
+
+    if (fourPlayerSystem.isConnected) {
+        fourPlayerSystem.broadcastContainerState();
+    }
+
+    if (midGame) {
+        const myId = fourPlayerSystem.playerId;
+        window.scoopedPlayers.add(myId);
+        markPlayerScooped(myId);
+
+        // If it was this player's turn, immediately hand it to the next
+        // active (non-scooped) player instead of stalling the game.
+        if (window.currentTurn === myId && window.turnOrder.length > 0) {
+            const currentIndex = window.turnOrder.indexOf(myId);
+            let nextIndex = currentIndex;
+            for (let i = 0; i < window.turnOrder.length; i++) {
+                nextIndex = (nextIndex + 1) % window.turnOrder.length;
+                if (!window.scoopedPlayers.has(window.turnOrder[nextIndex])) break;
+            }
+            window.currentTurn = window.turnOrder[nextIndex];
+            updateTurnIndicator();
+            if (fourPlayerSystem.isConnected) {
+                fourPlayerSystem.sendMessage({ type: 'turn_changed', data: { currentTurn: window.currentTurn } });
+            }
+        }
+
+        fourPlayerSystem.log(`🏳️ You scooped — your board is cleared and you're now just watching until the game resets.`);
+
+        if (fourPlayerSystem.isConnected) {
+            fourPlayerSystem.sendMessage({ type: 'scoop_game', data: {} });
+        }
+    } else {
+        fourPlayerSystem.log('🗑️ Deck removed — you can now re-import a new deck list.');
+        if (fourPlayerSystem.isConnected) {
+            fourPlayerSystem.sendMessage({
+                type: 'announcement',
+                data: { message: `${fourPlayerSystem.playerName} (Player ${fourPlayerSystem.playerId}) cleared their deck and is re-importing.` }
+            });
+        }
+    }
+}
+
+function markPlayerScooped(playerId) {
+    window.scoopedPlayers.add(playerId);
+    const container = document.getElementById(`player${playerId}Container`) ||
+        (fourPlayerSystem.playerId === playerId ? fourPlayerSystem.mainContainer : null);
+    if (container) {
+        container.classList.add('scooped-out');
+    }
+    const statusEl = document.getElementById(`player${playerId}Status`);
+    if (statusEl) statusEl.title = 'Scooped — spectating until the game resets';
+    const emojiEl = document.getElementById(`player${playerId}HandEmoji`);
+    if (emojiEl) emojiEl.textContent = '🏳️';
+}
+
+function unmarkPlayerScooped(playerId) {
+    window.scoopedPlayers.delete(playerId);
+    const container = document.getElementById(`player${playerId}Container`);
+    if (container) container.classList.remove('scooped-out');
+    if (fourPlayerSystem.mainContainer) fourPlayerSystem.mainContainer.classList.remove('scooped-out');
+}
+
+// ============================================================
 // ADD CARD MODAL (search any MTG card, place with blue highlight)
 // ============================================================
 function openAddCardModal() {
@@ -10118,11 +10334,67 @@ function refreshPlayerView(playerId) {
     }
 }
 
-function resetGame() {
-    if (!confirm('⚠️ Reset entire game? This will clear all cards, life totals, and counters. This cannot be undone!')) {
+// ============================================================
+// RESET GAME — now requires everyone to agree
+// Clicking the button casts your vote (logged for everyone to see); the
+// board only actually clears once every currently-connected player has
+// voted yes. See handleResetVoteUpdate/reset_game_confirmed in the
+// FourPlayerSystem class, and handleResetVote on the server.
+// ============================================================
+function requestResetVote() {
+    if (!fourPlayerSystem.isConnected) {
+        // Solo/offline - nobody else to vote, just reset immediately.
+        if (confirm('⚠️ Reset entire game? This will clear all cards, life totals, and counters. This cannot be undone!')) {
+            performLocalGameReset();
+        }
         return;
     }
-    
+
+    if (fourPlayerSystem.isSpectator) {
+        fourPlayerSystem.log('👁️ Spectators can\'t vote to reset the game', 'error');
+        return;
+    }
+
+    if (!confirm('⚠️ Vote to reset the game for everyone? All players must agree before anything actually clears.')) {
+        return;
+    }
+
+    fourPlayerSystem.sendMessage({ type: 'reset_vote', data: {} });
+
+    const btn = document.getElementById('resetGameBtn');
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = '🗳️ Vote cast — waiting on others...';
+    }
+}
+
+// Updates the Reset Game button to reflect the current tally. `votes` is
+// the array of playerIds who've voted so far; `required` is how many
+// currently-connected players are needed for unanimity.
+function updateResetVoteButton(votes, required, myPlayerId) {
+    const btn = document.getElementById('resetGameBtn');
+    if (!btn) return;
+
+    if (votes.includes(myPlayerId)) {
+        btn.disabled = true;
+        btn.textContent = `🗳️ Voted to reset (${votes.length}/${required})`;
+    } else {
+        btn.disabled = false;
+        btn.textContent = `🔄 Reset Game (${votes.length}/${required} agreed)`;
+    }
+}
+
+function resetResetVoteButton() {
+    const btn = document.getElementById('resetGameBtn');
+    if (!btn) return;
+    btn.disabled = false;
+    btn.textContent = '🔄 Reset Game';
+}
+
+// Actually clears the board. Runs on every client at the same moment,
+// once the server broadcasts reset_game_confirmed (or immediately, for a
+// lone/offline session with no one else to vote).
+function performLocalGameReset() {
     // Clear all containers
     fourPlayerSystem.handContainer.innerHTML = '';
     fourPlayerSystem.mainContainer.innerHTML = '';
@@ -10153,6 +10425,8 @@ function resetGame() {
     window.playerReady = false;
     window.currentTurn = null;
     window.gameStarted = false;
+    window.turnOrder = [];
+    window.scoopedPlayers = new Set();
     document.getElementById('mulliganBtn').disabled = true;
     document.getElementById('mulliganBtn').style.display = 'inline-block';
     document.getElementById('confirmReadyBtn').disabled = false;
@@ -10162,18 +10436,22 @@ function resetGame() {
     document.getElementById('endTurnBtn').style.display = 'none';
     document.getElementById('mainContainer').classList.remove('active-turn');
     
-    // Reset all player ready states
+    // Reset all player ready states and scoop markers
     for (let i = 1; i <= 4; i++) {
         const emojiEl = document.getElementById(`player${i}HandEmoji`);
         if (emojiEl) emojiEl.textContent = '🤚';
+        unmarkPlayerScooped(i);
     }
+    window.playerReadyStates = {};
+
+    resetResetVoteButton();
     
     renderDeckLifeRow();
     for (let i=1;i<=4;i++) updateProjectionLifeBadge(i);
     
     fourPlayerSystem.log('🔄 Game reset complete - Counter entities cleared with main container');
     
-    if (fourPlayerSystem.isConnected) {
+    if (fourPlayerSystem.isConnected && !fourPlayerSystem.isSpectator) {
         fourPlayerSystem.broadcastContainerState();
         // Broadcast ready state reset
         fourPlayerSystem.sendMessage({
@@ -10185,6 +10463,7 @@ function resetGame() {
         });
     }
 }
+
 
 // ============================================================
 // MULLIGAN SYSTEM
@@ -10270,6 +10549,7 @@ window.mulliganLocked = false;
 window.gameStarted = false;
 window.currentTurn = null;
 window.turnOrder = [];
+window.scoopedPlayers = new Set(); // playerIds who forfeited mid-game (spectate until reset)
 
 function confirmReady() {
     if (window.playerReady) {
@@ -10383,9 +10663,14 @@ function endTurn() {
         return;
     }
     
-    // Find next player in turn order
+    // Find next player in turn order, skipping anyone who has scooped
+    // (forfeited) — they no longer take turns, just watch until reset.
     const currentIndex = window.turnOrder.indexOf(window.currentTurn);
-    const nextIndex = (currentIndex + 1) % window.turnOrder.length;
+    let nextIndex = currentIndex;
+    for (let i = 0; i < window.turnOrder.length; i++) {
+        nextIndex = (nextIndex + 1) % window.turnOrder.length;
+        if (!window.scoopedPlayers.has(window.turnOrder[nextIndex])) break;
+    }
     window.currentTurn = window.turnOrder[nextIndex];
     
     fourPlayerSystem.log(`⏭️ Turn passed to Player ${window.currentTurn}`);
