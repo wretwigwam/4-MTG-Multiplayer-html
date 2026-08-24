@@ -4745,6 +4745,21 @@ class FourPlayerWebSocketSystem {
 case 'container_state':
         const { playerId, containerState, zoneCounts, gameState } = message.data;
         if (playerId !== this.playerId) {
+            // Keep the cached copy of this player's data in sync too - not
+            // just the DOM. Things like the trade modal's "Take from their
+            // field" read straight from `connectedPlayers`, and previously
+            // that cache was only ever set once (on join/room_state) and
+            // never updated again as the game went on, so it could go
+            // stale and miss cards the other player had actually played.
+            let cachedPlayer = this.connectedPlayers.get(playerId);
+            if (!cachedPlayer) {
+                cachedPlayer = { playerId };
+                this.connectedPlayers.set(playerId, cachedPlayer);
+            }
+            cachedPlayer.containerState = containerState;
+            if (zoneCounts) cachedPlayer.zoneCounts = zoneCounts;
+            if (gameState) cachedPlayer.gameState = gameState;
+
             this.updateRemotePlayerContainer(playerId, containerState);
             if (zoneCounts) {
                 this.updateRemoteZoneCounts(playerId, zoneCounts);
@@ -7861,34 +7876,32 @@ function confirmTradeSelection() {
         }
     });
 
-    document.addEventListener('mousemove', (e) => {
-        if (preview.style.display !== 'none') {
-            const previewWidth = preview.offsetWidth;
-            const previewHeight = preview.offsetHeight;
-            const padding = 15;
+    function repositionPreview(e) {
+        const previewWidth = preview.offsetWidth;
+        const previewHeight = preview.offsetHeight;
+        const padding = 15;
 
-            let left = e.clientX + padding;
-            let top = e.clientY + padding;
+        let left = e.clientX + padding;
+        let top = e.clientY + padding;
 
-            if (left + previewWidth > window.innerWidth) {
-                left = e.clientX - previewWidth - padding;
-            }
-
-            if (top + previewHeight > window.innerHeight) {
-                top = e.clientY - previewHeight - padding;
-            }
-
-            if (top < 0) top = padding;
-            if (left < 0) left = padding;
-
-            preview.style.left = `${left}px`;
-            preview.style.top = `${top}px`;
+        if (left + previewWidth > window.innerWidth) {
+            left = e.clientX - previewWidth - padding;
         }
-    });
+
+        if (top + previewHeight > window.innerHeight) {
+            top = e.clientY - previewHeight - padding;
+        }
+
+        if (top < 0) top = padding;
+        if (left < 0) left = padding;
+
+        preview.style.left = `${left}px`;
+        preview.style.top = `${top}px`;
+    }
 
     function showPreview(card) {
         if (!shiftDown) return;
-        
+
         // Exclude deck-back cards
         if (card.classList.contains('deck-back')) return;
         const isDeckBackWrapper = card.closest('.card-wrapper');
@@ -7897,113 +7910,57 @@ function confirmTradeSelection() {
 
         let img = card.querySelector('img');
         if (!img) return;
-        
+
         // Don't show card back
         if (img.src.includes('card-back.jpg')) return;
 
-        // For remote player cards, we need to handle the scaled projection
-        const isRemoteCard = card.closest('.remote-player-container');
-        
         previewImg.src = img.src;
         preview.style.display = 'block';
-        
-        // Log for debugging
-        if (isRemoteCard) {
-            console.log('Previewing remote player card:', card.dataset.name);
-        }
     }
 
     function hidePreview() {
         preview.style.display = 'none';
     }
 
-    const containers = [
-        document.getElementById('mainContainer'),
-        document.getElementById('handContainer'),
-        // BUGFIX: the deck/graveyard/exile/command pile section (which
-        // shows real card art, e.g. the top card of your graveyard) was
-        // never added here, so Shift-hover zoom silently did nothing
-        // anywhere in that section.
-        document.getElementById('deckPlaymat1'),
-        ...Array.from(document.querySelectorAll('.remote-player-container'))
-    ].filter(Boolean);
-    
-    // Add modal content for shift preview
-    function setupModalPreview() {
-        const modalContent = document.getElementById('zoneModalContent');
-        if (modalContent) {
-            modalContent.addEventListener('mouseover', (e) => {
-                const card = e.target.closest('.card, .modal-card');
-                if (card) showPreview(card);
-            });
-            modalContent.addEventListener('mouseout', (e) => {
-                if (e.target.closest('.card, .modal-card')) hidePreview();
-            });
+    // ------------------------------------------------------------
+    // Everything below is delegated on `document` itself, instead of being
+    // wired up per-container or per-modal. This is what makes shift-hover
+    // zoom work EVERYWHERE - the battlefield, hand, deck/graveyard/exile/
+    // command piles, remote player projections, the zone-contents modal,
+    // the trade modal (Take/Give card selection), the add-card search
+    // results, and any future modal - without needing to remember to wrap
+    // each modal's open function individually (which is exactly how the
+    // trade modal ended up missing it before: it was a separate modal
+    // system that nobody had wired in).
+    //
+    // mouseover/mouseout bubble, so a single pair of listeners on
+    // `document`, combined with closest(CARD_SELECTOR), covers every
+    // card-shaped element in the whole app, current and future.
+    // ------------------------------------------------------------
+    const CARD_SELECTOR = '.card, .modal-card, .trade-card';
+
+    document.addEventListener('mouseover', (e) => {
+        if (!shiftDown) return;
+        const card = e.target.closest(CARD_SELECTOR);
+        if (card) showPreview(card);
+    });
+
+    document.addEventListener('mouseout', (e) => {
+        const card = e.target.closest(CARD_SELECTOR);
+        if (card) hidePreview();
+    });
+
+    document.addEventListener('mousemove', (e) => {
+        if (preview.style.display !== 'none') {
+            repositionPreview(e);
         }
-    }
-    
-    // Call setup when modal opens
-    const originalShowZoneModal = window.showZoneModal;
-    if (typeof showZoneModal !== 'undefined') {
-        window.showZoneModal = function(...args) {
-            if (originalShowZoneModal) originalShowZoneModal.apply(this, args);
-            setTimeout(setupModalPreview, 100);
-        };
-    }
-    
-    // Also wrap showRemoteZoneModal for opponent deck/zone viewing
-    const originalShowRemoteZoneModal = window.showRemoteZoneModal;
-    if (typeof showRemoteZoneModal !== 'undefined') {
-        window.showRemoteZoneModal = function(...args) {
-            if (originalShowRemoteZoneModal) originalShowRemoteZoneModal.apply(this, args);
-            setTimeout(setupModalPreview, 100);
-        };
-    }
-
-    containers.forEach(container => {
-        container.addEventListener('mouseover', (e) => {
-            // Check if we're hovering over a card or inside a projection-inner wrapper
-            let card = e.target.closest('.card');
-            
-            // Handle remote player cards that might be inside projection-inner
-            if (!card) {
-                const projectionInner = e.target.closest('.projection-inner');
-                if (projectionInner) {
-                    card = e.target.closest('.card');
-                }
-            }
-            
-            if (!card) return;
-            if (shiftDown) {
-                showPreview(card);
-            }
-        });
-
-        container.addEventListener('mouseout', (e) => {
-            const card = e.target.closest('.card');
-            if (card) {
-                hidePreview();
-            }
-        });
-
-        container.addEventListener('mousemove', (e) => {
-            // Check if we're hovering over a card
-            let card = e.target.closest('.card');
-            
-            // Handle remote player cards
-            if (!card) {
-                const projectionInner = e.target.closest('.projection-inner');
-                if (projectionInner) {
-                    card = e.target.closest('.card');
-                }
-            }
-            
-            if (card && shiftDown) {
-                showPreview(card);
-            } else {
-                hidePreview();
-            }
-        });
+        if (!shiftDown) return;
+        const card = e.target.closest(CARD_SELECTOR);
+        if (card) {
+            showPreview(card);
+        } else {
+            hidePreview();
+        }
     });
 })();
 
