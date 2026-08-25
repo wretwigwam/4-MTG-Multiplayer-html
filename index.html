@@ -4707,39 +4707,64 @@ class FourPlayerWebSocketSystem {
                 break;
 
             case 'game_started':
-                // Game has started
+                // Game has started. The server picked the random starting
+                // player and the turn order (the list of seats that were
+                // actually in the game) - this client just applies it.
                 window.gameStarted = true;
                 window.currentTurn = message.data.startingPlayer;
-                window.turnOrder = message.data.turnOrder;
-                
-                this.log(`🎮 Game Started! Player ${message.data.startingPlayer} goes first!`);
+                window.turnOrder = message.data.turnOrder || [];
+
+                this.log(`🎲 Game Started! Player ${message.data.startingPlayer} goes first!`);
                 this.log(`📋 Turn order: ${window.turnOrder.join(' → ')}`);
-                
-                // Show end turn button
-                document.getElementById('endTurnBtn').style.display = 'inline-block';
-                
+
+                // Hide mulligan/ready, show End Turn (not for spectators)
+                if (!this.isSpectator) {
+                    const mb = document.getElementById('mulliganBtn');
+                    const rb = document.getElementById('confirmReadyBtn');
+                    const eb = document.getElementById('endTurnBtn');
+                    if (mb) mb.style.display = 'none';
+                    if (rb) rb.style.display = 'none';
+                    if (eb) eb.style.display = 'inline-block';
+                }
+
                 // Reset all hand emojis back to open hand
                 for (let i = 1; i <= 4; i++) {
                     const emoji = document.getElementById(`player${i}HandEmoji`);
                     if (emoji) emoji.textContent = '🤚';
                 }
-                
-                // Update turn indicator
-                if (typeof updateTurnIndicator === 'function') {
-                    updateTurnIndicator();
-                }
+
+                if (typeof updateTurnIndicator === 'function') updateTurnIndicator();
                 break;
 
-            case 'turn_changed':
-                // Turn has changed
+            case 'turn_state_update': {
+                // Single source of truth for turn state, sent by the
+                // server after: an End Turn click, a permanent departure,
+                // a mid-game scoop, or a host migration. Always just
+                // apply what the server says rather than computing
+                // anything locally - this is what keeps every client
+                // (including ones that were briefly disconnected) in
+                // perfect agreement about whose turn it is.
+                const previousTurn = window.currentTurn;
+                const previousOrderLength = window.turnOrder ? window.turnOrder.length : 0;
+                window.gameStarted = message.data.gameStarted;
+                window.turnOrder = message.data.turnOrder || [];
                 window.currentTurn = message.data.currentTurn;
-                this.log(`⏭️ It's now Player ${window.currentTurn}'s turn`);
-                
-                // Update turn indicator
-                if (typeof updateTurnIndicator === 'function') {
-                    updateTurnIndicator();
+
+                if (window.turnOrder.length < previousOrderLength) {
+                    this.log(`📋 Turn order updated: ${window.turnOrder.join(' → ') || '(no players left)'}`);
                 }
+                if (window.currentTurn !== previousTurn && window.currentTurn !== null) {
+                    this.log(`⏭️ It's now Player ${window.currentTurn}'s turn`);
+                }
+
+                const eb2 = document.getElementById('endTurnBtn');
+                if (eb2 && !this.isSpectator) {
+                    eb2.style.display = window.gameStarted ? 'inline-block' : 'none';
+                }
+
+                if (typeof updateTurnIndicator === 'function') updateTurnIndicator();
                 break;
+            }
 
 				
 case 'container_state':
@@ -4801,6 +4826,28 @@ case 'container_state':
                         applyRemoteGameState(player.gameState);
                     }
                 });
+
+                // Pick up the current turn state too - this is what makes
+                // reconnecting mid-game (or a spectator joining mid-game)
+                // immediately show the correct "whose turn" state instead
+                // of waiting for the next turn_state_update broadcast.
+                if (typeof message.data.gameStarted !== 'undefined') {
+                    window.gameStarted = message.data.gameStarted;
+                    window.turnOrder = message.data.turnOrder || [];
+                    window.currentTurn = message.data.currentTurn;
+
+                    const eb3 = document.getElementById('endTurnBtn');
+                    const mb3 = document.getElementById('mulliganBtn');
+                    const rb3 = document.getElementById('confirmReadyBtn');
+                    if (!this.isSpectator) {
+                        if (eb3) eb3.style.display = window.gameStarted ? 'inline-block' : 'none';
+                        if (window.gameStarted) {
+                            if (mb3) mb3.style.display = 'none';
+                            if (rb3) rb3.style.display = 'none';
+                        }
+                    }
+                    if (typeof updateTurnIndicator === 'function') updateTurnIndicator();
+                }
 
                 this.log(`📊 Room state updated - ${Object.keys(players).length} players connected`);
                 break;
@@ -5050,28 +5097,39 @@ showPermissionModal(message, callback) {
 
     handleTakeCardsRequest(data) {
         const { requestingPlayerId, zoneType, cardCount, cardNames } = data;
-        
+
         const cardList = cardNames.join(', ');
-        const allow = confirm(
-            `Player ${requestingPlayerId} wants to take ${cardCount} card(s) from your ${zoneType}:\n\n${cardList}\n\nAllow?`
-        );
-        
-        if (allow) {
-            this.log(`✅ Allowed Player ${requestingPlayerId} to take ${cardCount} card(s) from ${zoneType}`, 'info');
-        } else {
-            this.log(`🚫 Denied Player ${requestingPlayerId}'s request to take cards from ${zoneType}`, 'warning');
-        }
-        
-        // Send response back to server
-        this.sendMessage({
-            type: 'take_cards_response',
-            data: {
-                requestingPlayerId: requestingPlayerId,
-                zoneType: zoneType,
-                allowed: allow,
-                cardNames: cardNames
+
+        // Use the custom modal instead of confirm() - confirm() is a
+        // blocking native dialog that browsers can silently auto-suppress
+        // (instantly resolving to false with no real user interaction) in
+        // exactly this kind of background/event-driven context. That's
+        // what was causing every take-cards request to look like an
+        // instant decline: the "player" never actually saw a prompt, the
+        // browser just returned false immediately. The give-cards and
+        // zone-view-request flows already use this same custom modal for
+        // that reason - this brings the take-cards flow in line with them.
+        this.showPermissionModal(
+            `Player ${requestingPlayerId} wants to take ${cardCount} card(s) from your ${zoneType}:\n\n${cardList}\n\nAllow?`,
+            (allow) => {
+                if (allow) {
+                    this.log(`✅ Allowed Player ${requestingPlayerId} to take ${cardCount} card(s) from ${zoneType}`, 'info');
+                } else {
+                    this.log(`🚫 Denied Player ${requestingPlayerId}'s request to take cards from ${zoneType}`, 'warning');
+                }
+
+                // Send response back to server
+                this.sendMessage({
+                    type: 'take_cards_response',
+                    data: {
+                        requestingPlayerId: requestingPlayerId,
+                        zoneType: zoneType,
+                        allowed: allow,
+                        cardNames: cardNames
+                    }
+                });
             }
-        });
+        );
     }
 
     handleTakeCardsResponse(data) {
@@ -5351,6 +5409,20 @@ showPermissionModal(message, callback) {
         this.clearPlayerSlot(oldSeat);
         // Seat `newSeat`'s panel is repopulated by the room_state broadcast
         // the server sends immediately after host_migrated.
+
+        // The promoted player's seat number in the turn order changed too
+        // (e.g. seat 2 -> seat 1) - apply the server's already-renumbered
+        // turn state directly rather than trying to patch it locally.
+        if (typeof data.gameStarted !== 'undefined') {
+            window.gameStarted = data.gameStarted;
+            window.turnOrder = data.turnOrder || [];
+            window.currentTurn = data.currentTurn;
+            const eb4 = document.getElementById('endTurnBtn');
+            if (eb4 && !this.isSpectator) {
+                eb4.style.display = window.gameStarted ? 'inline-block' : 'none';
+            }
+            if (typeof updateTurnIndicator === 'function') updateTurnIndicator();
+        }
     }
 
     handleResetVoteUpdate(data) {
@@ -6306,6 +6378,12 @@ updateOwnSlot() {
             testBtn.disabled = true;
             testBtn.textContent = '👁️ Spectator Mode';
         }
+
+        // Spectators watch, they don't ready up, mulligan, or take turns
+        ['confirmReadyBtn', 'mulliganBtn', 'endTurnBtn'].forEach(id => {
+            const btn = document.getElementById(id);
+            if (btn) btn.style.display = 'none';
+        });
     }
 
     startZoneCardDrag(zoneCard, zoneElement, e) {
@@ -7823,7 +7901,7 @@ function confirmTradeSelection() {
 
     if (direction === 'take') {
         // Ask the target's permission first (reuses the existing take-cards
-        // permission flow - same confirm() prompt already used for
+        // permission flow - the same custom permission modal used for
         // deck/graveyard/exile takes, just with zoneType 'field').
         const entries = selectedDivs.map(d => d.tradeData);
         window.pendingFieldTradeRequest = {
@@ -8824,22 +8902,6 @@ function removeDeck() {
         const myId = fourPlayerSystem.playerId;
         window.scoopedPlayers.add(myId);
         markPlayerScooped(myId);
-
-        // If it was this player's turn, immediately hand it to the next
-        // active (non-scooped) player instead of stalling the game.
-        if (window.currentTurn === myId && window.turnOrder.length > 0) {
-            const currentIndex = window.turnOrder.indexOf(myId);
-            let nextIndex = currentIndex;
-            for (let i = 0; i < window.turnOrder.length; i++) {
-                nextIndex = (nextIndex + 1) % window.turnOrder.length;
-                if (!window.scoopedPlayers.has(window.turnOrder[nextIndex])) break;
-            }
-            window.currentTurn = window.turnOrder[nextIndex];
-            updateTurnIndicator();
-            if (fourPlayerSystem.isConnected) {
-                fourPlayerSystem.sendMessage({ type: 'turn_changed', data: { currentTurn: window.currentTurn } });
-            }
-        }
 
         fourPlayerSystem.log(`🏳️ You scooped — your board is cleared and you're now just watching until the game resets.`);
 
@@ -10380,8 +10442,8 @@ function performLocalGameReset() {
     // Reset mulligan and ready system
     window.mulliganLocked = false;
     window.playerReady = false;
-    window.currentTurn = null;
     window.gameStarted = false;
+    window.currentTurn = null;
     window.turnOrder = [];
     window.scoopedPlayers = new Set();
     document.getElementById('mulliganBtn').disabled = true;
@@ -10398,6 +10460,8 @@ function performLocalGameReset() {
         const emojiEl = document.getElementById(`player${i}HandEmoji`);
         if (emojiEl) emojiEl.textContent = '🤚';
         unmarkPlayerScooped(i);
+        const container = document.getElementById(`player${i}Container`);
+        if (container) { container.style.border = ''; container.style.boxShadow = ''; }
     }
     window.playerReadyStates = {};
 
@@ -10504,8 +10568,8 @@ window.playerReadyStates = {}; // Track all players' ready states
 window.playerReady = false;
 window.mulliganLocked = false;
 window.gameStarted = false;
-window.currentTurn = null;
-window.turnOrder = [];
+window.currentTurn = null; // seat number whose turn it is (server-authoritative)
+window.turnOrder = []; // seat numbers in rotation order (server-authoritative)
 window.scoopedPlayers = new Set(); // playerIds who forfeited mid-game (spectate until reset)
 
 function confirmReady() {
@@ -10570,93 +10634,82 @@ function checkAllPlayersReady() {
 }
 
 function startGame(players) {
-    window.gameStarted = true;
-    window.turnOrder = [...players].sort((a, b) => a - b);
-    
-    // Randomly choose starting player
-    const startingPlayer = players[Math.floor(Math.random() * players.length)];
-    window.currentTurn = startingPlayer;
-    
-    fourPlayerSystem.log(`🎮 Game Started! Player ${startingPlayer} goes first!`);
-    fourPlayerSystem.log(`📋 Turn order: ${window.turnOrder.join(' → ')}`);
-    
-    // Hide mulligan and confirm ready buttons, show end turn button
-    document.getElementById('mulliganBtn').style.display = 'none';
-    document.getElementById('confirmReadyBtn').style.display = 'none';
-    document.getElementById('endTurnBtn').style.display = 'inline-block';
-    
-    // Reset all hand emojis back to open hand
-    for (let i = 1; i <= 4; i++) {
-        const emojiEl = document.getElementById(`player${i}HandEmoji`);
-        if (emojiEl) emojiEl.textContent = '🤚';
-    }
-    
-    // Highlight current player's turn
-    updateTurnIndicator();
-    
-    // Broadcast game start
-    if (fourPlayerSystem.isConnected && fourPlayerSystem.playerId === startingPlayer) {
-        fourPlayerSystem.sendMessage({
-            type: 'game_started',
-            data: {
-                startingPlayer: startingPlayer,
-                turnOrder: window.turnOrder
-            }
-        });
+    // The server is now the single source of truth for the random
+    // starting player and the turn order - it picks once, authoritatively,
+    // and broadcasts the result back as 'game_started'. This client just
+    // requests it; every connected client does the same thing at roughly
+    // the same moment (they all detect "everyone's ready" together), but
+    // the server only honors the first request per room, so there's no
+    // risk of different clients disagreeing about who actually goes first.
+    if (fourPlayerSystem.isConnected) {
+        fourPlayerSystem.sendMessage({ type: 'request_start_game', data: {} });
+    } else {
+        // Solo/offline fallback - nobody to ask, just do it locally.
+        window.gameStarted = true;
+        window.turnOrder = [...players].sort((a, b) => a - b);
+        window.currentTurn = players[Math.floor(Math.random() * players.length)];
+        fourPlayerSystem.log(`🎲 Game Started! Player ${window.currentTurn} goes first!`);
+        fourPlayerSystem.log(`📋 Turn order: ${window.turnOrder.join(' → ')}`);
+        document.getElementById('mulliganBtn').style.display = 'none';
+        document.getElementById('confirmReadyBtn').style.display = 'none';
+        document.getElementById('endTurnBtn').style.display = 'inline-block';
+        for (let i = 1; i <= 4; i++) {
+            const emojiEl = document.getElementById(`player${i}HandEmoji`);
+            if (emojiEl) emojiEl.textContent = '🤚';
+        }
+        updateTurnIndicator();
     }
 }
 
 // ============================================================
 // TURN MANAGEMENT SYSTEM
+// The server is authoritative for whose turn it is (see request_start_game
+// / end_turn / turn_state_update above). This client only ever sends the
+// request to end ITS OWN turn and then waits for the server's
+// turn_state_update to actually change anything - it never advances
+// window.currentTurn locally. That's deliberate: it's what guarantees
+// every client agrees, even one that was disconnected and just
+// reconnected mid-game, or one that's about to receive a scoop/host
+// migration update at the same moment.
 // ============================================================
 function endTurn() {
     if (!window.gameStarted) {
         fourPlayerSystem.log('❌ Game has not started yet', 'error');
         return;
     }
-    
+
     if (window.currentTurn !== fourPlayerSystem.playerId) {
         fourPlayerSystem.log('❌ It is not your turn', 'error');
         return;
     }
-    
-    // Find next player in turn order, skipping anyone who has scooped
-    // (forfeited) — they no longer take turns, just watch until reset.
-    const currentIndex = window.turnOrder.indexOf(window.currentTurn);
-    let nextIndex = currentIndex;
-    for (let i = 0; i < window.turnOrder.length; i++) {
-        nextIndex = (nextIndex + 1) % window.turnOrder.length;
-        if (!window.scoopedPlayers.has(window.turnOrder[nextIndex])) break;
-    }
-    window.currentTurn = window.turnOrder[nextIndex];
-    
-    fourPlayerSystem.log(`⏭️ Turn passed to Player ${window.currentTurn}`);
-    
-    updateTurnIndicator();
-    
-    // Broadcast turn change
+
     if (fourPlayerSystem.isConnected) {
-        fourPlayerSystem.sendMessage({
-            type: 'turn_changed',
-            data: {
-                currentTurn: window.currentTurn
-            }
-        });
+        fourPlayerSystem.sendMessage({ type: 'end_turn', data: {} });
+    } else {
+        // Solo/offline fallback
+        const idx = window.turnOrder.indexOf(window.currentTurn);
+        if (idx !== -1 && window.turnOrder.length > 0) {
+            window.currentTurn = window.turnOrder[(idx + 1) % window.turnOrder.length];
+            fourPlayerSystem.log(`⏭️ Turn passed to Player ${window.currentTurn}`);
+            updateTurnIndicator();
+        }
     }
 }
 
 function updateTurnIndicator() {
     const mainContainer = document.getElementById('mainContainer');
-    
+
     if (window.currentTurn === fourPlayerSystem.playerId) {
-        // It's your turn
         mainContainer.classList.add('active-turn');
     } else {
-        // Not your turn
         mainContainer.classList.remove('active-turn');
     }
-    
-    // Update projection borders for remote players
+
+    // Update projection borders for remote players. A disconnected
+    // player whose turn it currently is still gets the highlight - their
+    // spot in the rotation is preserved exactly as if they were present
+    // (see removeSeatFromTurnOrder on the server: a temporary disconnect
+    // never touches turn order, only a permanent leave or a scoop does).
     for (let i = 1; i <= 4; i++) {
         const container = document.getElementById(`player${i}Container`);
         if (container) {
