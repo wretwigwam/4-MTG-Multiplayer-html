@@ -2357,7 +2357,12 @@ function showSeatSelection(availableSeats) {
     const seatOptions = document.getElementById('seatOptions');
     seatOptions.innerHTML = '';
     
-    for (let i = 2; i <= 4; i++) {
+    // Seat 1 is included: once a room already exists, seat 1 is an
+    // ordinary seat like any other (it's only reserved for the "create a
+    // new game" flow, which never goes through seat selection at all -
+    // see createGame()). If the original host has since left, seat 1
+    // shows up here as available just like any other empty seat.
+    for (let i = 1; i <= 4; i++) {
         const seatBtn = document.createElement('button');
         const isAvailable = availableSeats.includes(i);
         
@@ -2391,7 +2396,7 @@ function selectSeat(seat) {
     // Update button styles
     const buttons = document.querySelectorAll('#seatOptions button');
     buttons.forEach((btn, index) => {
-        if (index + 2 === seat) {
+        if (index + 1 === seat) {
             btn.style.border = '3px solid #FFD700';
             btn.style.boxShadow = '0 0 15px #FFD700';
             btn.style.transform = 'scale(1.05)';
@@ -5391,38 +5396,13 @@ showPermissionModal(message, callback) {
     // message (sent by the server right after this) repopulates seat 1's
     // actual board contents, so this only needs to handle the seat labels
     // and clearing out the vacated slot.
+    // The player in the host's seat left for good. The host TITLE has
+    // moved to the next-lowest remaining seat, but nobody's actual seat
+    // position changes - the formerly-host seat becomes vacant and can be
+    // joined by a new player later (see the seat-selection screen).
     handleHostMigrated(data) {
-        const { oldSeat, newSeat, playerName } = data;
-        this.log(`👑 ${playerName} is now the host (moved from Player ${oldSeat} to Player ${newSeat})`);
-
-        if (this.playerId === oldSeat && !this.isSpectator) {
-            // This is me - I've just become the new host.
-            this.playerId = newSeat;
-            this.seatNumber = newSeat;
-            try { sessionStorage.setItem('ws_seat_number', String(newSeat)); } catch (e) {}
-            this.updatePlayerInfo();
-            this.updateOwnSlot();
-            this.log(`🎉 You are now Player ${newSeat} (the host)`);
-        }
-
-        this.connectedPlayers.delete(oldSeat);
-        this.clearPlayerSlot(oldSeat);
-        // Seat `newSeat`'s panel is repopulated by the room_state broadcast
-        // the server sends immediately after host_migrated.
-
-        // The promoted player's seat number in the turn order changed too
-        // (e.g. seat 2 -> seat 1) - apply the server's already-renumbered
-        // turn state directly rather than trying to patch it locally.
-        if (typeof data.gameStarted !== 'undefined') {
-            window.gameStarted = data.gameStarted;
-            window.turnOrder = data.turnOrder || [];
-            window.currentTurn = data.currentTurn;
-            const eb4 = document.getElementById('endTurnBtn');
-            if (eb4 && !this.isSpectator) {
-                eb4.style.display = window.gameStarted ? 'inline-block' : 'none';
-            }
-            if (typeof updateTurnIndicator === 'function') updateTurnIndicator();
-        }
+        const { newHostSeat, playerName } = data;
+        this.log(`👑 ${playerName} (Player ${newHostSeat}) is now the host`);
     }
 
     handleResetVoteUpdate(data) {
@@ -5473,7 +5453,27 @@ updateOwnSlot() {
         }
     }
 
+    // Restores all four remote deck-view buttons to their normal state
+    // (enabled, default click handler). Called before re-disabling just
+    // the current seat's button, so a stale "disabled - this is your own
+    // deck" state left behind on a seat this player used to occupy
+    // (before a reconnect or host migration changed their seat number)
+    // doesn't get stuck forever.
+    resetDeckButtons() {
+        for (let seat = 1; seat <= 4; seat++) {
+            const btn = document.getElementById(`player${seat}DeckBtn`);
+            if (!btn) continue;
+            btn.disabled = false;
+            btn.style.opacity = '';
+            btn.style.cursor = '';
+            btn.title = 'View Deck';
+            btn.onclick = () => showRemoteZone(seat, 'deck');
+        }
+    }
+
     disableOwnDeckButton() {
+        // Always restore every seat's button first - see resetDeckButtons().
+        this.resetDeckButtons();
         // Disable the deck button for the player's own slot
         if (this.playerId) {
             const deckBtn = document.getElementById(`player${this.playerId}DeckBtn`);
